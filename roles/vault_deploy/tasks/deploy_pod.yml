@@ -293,14 +293,14 @@
       < ((vault_deploy_gid_map_parts[0] | int)
       + (vault_deploy_gid_map_parts[2] | int))
 
-- name: Ensure Vault data dir ownership matches container mapping
-  ansible.builtin.file:
-    path: "{{ vault_deploy_host_data_dir }}"
-    state: directory
-    owner: "{{ vault_deploy_host_uid }}"
-    group: "{{ vault_deploy_host_gid }}"
-    recurse: true
-  tags: [deployment]
-  when:
-    - vault_deploy_host_uid is defined
-    - vault_deploy_host_gid is defined
+# - name: Ensure Vault data dir ownership matches container mapping
+  # ansible.builtin.file:
+    # path: "{{ vault_deploy_host_data_dir }}"
+    # state: directory
+    # owner: "{{ vault_deploy_host_uid }}"
+    # group: "{{ vault_deploy_host_gid }}"
+    # recurse: true
+  # tags: [deployment]
+  # when:
+    # - vault_deploy_host_uid is defined
+    # - vault_deploy_host_gid is defined
