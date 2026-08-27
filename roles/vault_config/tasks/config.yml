@@ -712,6 +712,14 @@
           become: false
           changed_when: false
 
+    - name: Create AppRole credentials
+      ansible.builtin.include_tasks: approle_credentials.yml
+      loop: "{{ vault_config_approle_secrets }}"
+      loop_control:
+        loop_var: approle
+        label: "{{ approle.role_name }}"
+
+
   rescue:
     - name: Show terragrunt failure summary
       ansible.builtin.debug:
