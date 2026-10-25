@@ -102,23 +102,24 @@ jobs:
           VERSION: ${{ inputs.version || '' }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = push ]; then
-            commit_message="$(git show -s --format=%B "$GITHUB_SHA")"
-            python scripts/classify-security-release.py \
-              --event-kind push \
-              --base-sha "$BEFORE_SHA" \
-              --head-sha "$GITHUB_SHA" \
-              --ref "$GITHUB_REF" \
-              --commit-message "$commit_message" \
-              --evidence-id "$EVIDENCE_ID" \
-              --binding-root security-binding-base
-          else
-            python scripts/classify-security-release.py \
-              --event-kind version \
-              --version "$VERSION" \
-              --evidence-id "$EVIDENCE_ID" \
-              --binding-root security-binding-base
-          fi
+          commit_message="$(git show -s --format=%B "$GITHUB_SHA")"
+          classification="$(bash scripts/wunder-devtools-ee.sh bash -c '
+            set -euo pipefail
+            # Process-local exact workspace trust; no global or wildcard admission.
+            export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=/workspace
+            if [ "$1" = push ]; then
+              python3 -B scripts/classify-security-release.py --event-kind push \
+                --base-sha "$2" --head-sha "$3" --ref "$4" --commit-message "$5" \
+                --evidence-id "$6" --binding-root security-binding-base --github-output "$HOME/classification"
+            else
+              python3 -B scripts/classify-security-release.py --event-kind version \
+                --version "$7" --evidence-id "$6" --binding-root security-binding-base \
+                --github-output "$HOME/classification"
+            fi >&2
+            cat "$HOME/classification"
+          ' classify-release "$EVENT_NAME" "$BEFORE_SHA" "$GITHUB_SHA" "$GITHUB_REF" \
+            "$commit_message" "$EVIDENCE_ID" "$VERSION")"
+          printf '%s\n' "$classification" >>"$GITHUB_OUTPUT"
 
   normal-readiness:
     name: Check normal release need before environment or App access
@@ -160,15 +161,15 @@ jobs:
       - name: Export only exact protected Develop YAML data
         env:
           CONTENT_SHA: ${{ steps.tips.outputs.content_sha }}
-        run: >-
-          python3 scripts/release_readiness_data.py
-          --revision "$CONTENT_SHA" --destination release-readiness-content
-      - name: Setup Python for trusted Main preflight
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
-        with:
-          python-version: "3.14"
-      - name: Install pinned receipt parser
-        run: python -m pip install --disable-pip-version-check PyYAML==6.0.3
+        run: |
+          set -euo pipefail
+          # Only fixed data bytes leave the offline, read-only validation environment.
+          bash scripts/wunder-devtools-ee.sh bash -c '
+            set -euo pipefail
+            python3 -B scripts/release_readiness_data.py \
+              --revision "$1" --destination "$HOME/release-readiness-content"
+            tar -C "$HOME" -cf - release-readiness-content
+          ' export-release-data "$CONTENT_SHA" | tar -xf -
       - name: Check actual unreleased fragments and recheck bound tips
         id: need
         env:
@@ -207,17 +208,15 @@ jobs:
           # LI-344 generator closure:end
           # Execute only the protected Main parser against the exact Develop data.
           resolution="$(
-            python scripts/release-version.py \
+            bash scripts/wunder-devtools-ee.sh python3 -B scripts/release-version.py \
               --galaxy "$content/galaxy.yml" --fragments "$fragments" \
               --requested-version "$VERSION_INPUT" --root "$content"
           )"
-          main_version="$(python - <<'PY'
+          main_version="$(bash scripts/wunder-devtools-ee.sh python3 -I -c '
           from pathlib import Path
           import yaml
-
           print(yaml.safe_load(Path("galaxy.yml").read_text())["version"])
-          PY
-          )"
+          ')"
           if [ "$(jq -er '.current_version' <<<"$resolution")" != "$main_version" ]; then
             echo '::error::Develop release baseline differs from Main;' \
               'complete the existing release or baseline convergence first.'
@@ -287,6 +286,20 @@ jobs:
           test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)" = "$GITHUB_SHA"
           test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/develop" --jq .object.sha)" = "$CONTENT_SHA"
 
+      - name: Verify immutable normal release toolchain before App access
+        if: needs.security-classification.outputs.security-release == 'false'
+        run: |
+          bash scripts/wunder-devtools-ee.sh python3 -I -c '
+          import importlib.metadata
+          import sys
+          expected = {"ansible-core": "2.18.19", "antsibull-changelog": "0.35.1", "PyYAML": "6.0.3"}
+          assert sys.version_info[:2] == (3, 11), "pinned release Python unavailable"
+          for package, version in expected.items():
+              actual = importlib.metadata.version(package)
+              assert actual == version, f"pinned release tool unavailable: {package}"
+              print(f"{package}=={actual}")
+          '
+
       - name: Mint release automation App token
         id: release-app
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
@@ -317,11 +330,13 @@ jobs:
           echo "email=${bot_id}+${login}@users.noreply.github.com" >>"$GITHUB_OUTPUT"
 
       - name: Setup Python
+        if: needs.security-classification.outputs.security-release == 'true'
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: "3.14"
 
       - name: Install release tools
+        if: needs.security-classification.outputs.security-release == 'true'
         run: |
           set -euo pipefail
           python -m pip install --disable-pip-version-check \
@@ -394,7 +409,74 @@ jobs:
             git merge-base --is-ancestor "$WORKFLOW_SOURCE_SHA" "$BASE_SHA"
           fi
 
+          # LI-360 normal EE transport:start
+          # Independent ordinary clones keep executable Main tooling separate from
+          # Develop data. Only this disposable parent is writable in the EE.
+          normal_ee_space=""
+          if [ "$SECURITY_RELEASE" = false ]; then
+            normal_ee_space="$RUNNER_TEMP/normal-release-ee"
+            test ! -e "$normal_ee_space"
+            mkdir -m 0700 "$normal_ee_space"
+            git clone --quiet --no-hardlinks --no-checkout "$GITHUB_WORKSPACE" "$normal_ee_space/main"
+            git -C "$normal_ee_space/main" checkout --quiet --detach "$WORKFLOW_SOURCE_SHA"
+            git clone --quiet --no-hardlinks --no-checkout "$GITHUB_WORKSPACE" "$normal_ee_space/data"
+            git -C "$normal_ee_space/data" checkout --quiet --detach "$BASE_SHA"
+            mkdir "$normal_ee_space/output"
+          fi
+          release_data() {
+            local operation="$RUNNER_TEMP/release-data-operation.sh" name fragment
+            cat >"$operation"
+            if [ "$SECURITY_RELEASE" = true ]; then
+              # Preserve the independently owned Security route.
+              # Literal operation written immediately above.
+              # shellcheck disable=SC1090
+              source "$operation"
+              return
+            fi
+            cp "$operation" "$normal_ee_space/operation.sh"
+            : >"$normal_ee_space/context.sh"
+            # Fixed nonsecret context only; App/GitHub credentials never enter EE.
+            for name in VERSION VERSION_INPUT BASE_SHA WORKFLOW_SOURCE_SHA CREATE_GITHUB_RELEASE \
+                PUBLISH_GALAXY GITHUB_REPOSITORY REPOSITORY_ID GITHUB_RUN_ID GITHUB_RUN_ATTEMPT \
+                WORKFLOW_REF WORKFLOW_EVENT WORKFLOW_ACTOR SECURITY_RELEASE PREPARATION_MODE pushed_sha; do
+              printf 'export %s=%q\n' "$name" "${!name-}" >>"$normal_ee_space/context.sh"
+            done
+            if ! (
+              cd "$normal_ee_space"
+              WUNDER_DEVTOOLS_WORKSPACE_MODE=rw WUNDER_DEVTOOLS_RUN_AS_HOST_UID=1 \
+                bash "$workflow_source/scripts/wunder-devtools-ee.sh" bash -c '
+                  set -euo pipefail
+                  source /workspace/context.sh
+                  export workflow_source=/workspace/main GITHUB_WORKSPACE=/workspace/data
+                  export RUNNER_TEMP=/workspace/output PYTHONDONTWRITEBYTECODE=1
+                  unset PYTHONPATH PYTHONHOME ANSIBLE_CONFIG
+                  cd /workspace/data
+                  source /workspace/operation.sh
+                ' normal-release-data "$@"
+            ); then
+              return 1
+            fi
+            # Return only the fixed generated outputs and consumed fragments.
+            for name in galaxy.yml CHANGELOG.rst changelogs/changelog.yaml \
+                changelogs/.plugin-cache.yaml changelogs/release-preparation.json; do
+              if [ -f "$normal_ee_space/data/$name" ]; then
+                cp "$normal_ee_space/data/$name" "$GITHUB_WORKSPACE/$name"
+              fi
+            done
+            while IFS= read -r -d '' fragment; do
+              if [ ! -e "$normal_ee_space/data/changelogs/fragments/${fragment##*/}" ]; then
+                rm -- "$fragment"
+              fi
+            done < <(find "$GITHUB_WORKSPACE/changelogs/fragments" -maxdepth 1 -type f \
+              \( -name '*.yml' -o -name '*.yaml' \) -print0)
+            for name in "$normal_ee_space/output"/*.tar.gz; do
+              [ ! -f "$name" ] || cp "$name" "$GITHUB_WORKSPACE/"
+            done
+          }
+          # LI-360 normal EE transport:end
+
           # LI-344 regular generation inputs:start
+          release_data <<'RELEASE_INPUTS'
           python -I - <<'PYINPUT'
           from pathlib import Path
 
@@ -412,6 +494,7 @@ jobs:
               if path.suffix in {".yml", ".yaml"} and (path.is_symlink() or not path.is_file()):
                   raise SystemExit("regular fragment input required")
           PYINPUT
+          RELEASE_INPUTS
           # LI-344 regular generation inputs:end
 
           fragment_count="$(
@@ -436,7 +519,7 @@ jobs:
           elif [ -n "$VERSION" ]; then
             version_args=(--requested-version "$VERSION")
           fi
-          version_resolution="$(
+          version_resolution="$(release_data "${version_args[@]}" <<'RELEASE_VERSION'
             python "$workflow_source/scripts/release-version.py" \
               --galaxy galaxy.yml \
               --fragments changelogs/fragments \
@@ -453,7 +536,8 @@ jobs:
               --workflow-event "$WORKFLOW_EVENT" \
               --workflow-actor "$WORKFLOW_ACTOR" \
               --root . \
-              "${version_args[@]}"
+              "$@"
+          RELEASE_VERSION
           )"
           VERSION="$(jq -er '.version' <<< "$version_resolution")"
           RELEASE_IMPACT="$(jq -er '.impact' <<< "$version_resolution")"
@@ -538,6 +622,7 @@ jobs:
 
           git switch -C "$RELEASE_BRANCH" "origin/$BASE_BRANCH"
 
+          release_data <<'RELEASE_GENERATE'
           python -I - <<'PY'
           import os
           from pathlib import Path
@@ -699,7 +784,18 @@ jobs:
               )
           PY
 
-          ansible-galaxy collection build --force
+          RELEASE_GENERATE
+
+          release_data <<'RELEASE_BUILD'
+          if [ "$SECURITY_RELEASE" = true ]; then
+            ansible-galaxy collection build --force
+          else
+            # The image owns Python 3.11.13/core 2.18.19/antsibull 0.35.1.
+            # Build from protected Main CWD; the candidate is collection data.
+            cd "$workflow_source"
+            ansible-galaxy collection build "$GITHUB_WORKSPACE" --output-path "$RUNNER_TEMP" --force
+          fi
+          RELEASE_BUILD
 
           tarball="$(ls ./*.tar.gz)"
           summary="$(
@@ -729,10 +825,14 @@ jobs:
               --head-sha "$pushed_sha" \
               --head-ref "$RELEASE_BRANCH" >/dev/null
           else
+            git -C "$normal_ee_space/data" fetch --quiet --no-tags "$GITHUB_WORKSPACE" "$pushed_sha"
+            git -C "$normal_ee_space/data" checkout --quiet --detach "$pushed_sha"
+            release_data <<'RELEASE_PREPARATION_PROOF'
             python "$workflow_source/scripts/normal_release_proof.py" preparation \
               --root "$GITHUB_WORKSPACE" --head "$pushed_sha" --base "$BASE_SHA" \
               --workflow-source "$WORKFLOW_SOURCE_SHA" \
               --repository "$GITHUB_REPOSITORY" --repository-id "$REPOSITORY_ID"
+          RELEASE_PREPARATION_PROOF
             # Reusing an immutable branch also reuses its approved publication settings.
             test "$(jq -er '.publication.github_release | tostring' changelogs/release-preparation.json)" = \
               "$CREATE_GITHUB_RELEASE"
@@ -935,6 +1035,10 @@ jobs:
             echo "head_sha=$pushed_sha"
             echo "emit_premerge=$emit_premerge"
           } >>"$GITHUB_OUTPUT"
+
+      - name: Remove disposable normal release data workspace
+        if: always() && needs.security-classification.outputs.security-release == 'false'
+        run: rm -rf -- "$RUNNER_TEMP/normal-release-ee" "$RUNNER_TEMP/release-data-operation.sh"
 
       - name: Emit exact native Security preparation data packet
         if: steps.prepare-release.outputs.emit_premerge == 'true'

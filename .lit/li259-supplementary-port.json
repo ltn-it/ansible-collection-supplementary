@@ -126,5 +126,60 @@
     "id": "sha256:e57589b6c51a12a5699aaa6e18a0f18935fa38039ca7a4a7cf16ed3074586856",
     "sha256": "e57589b6c51a12a5699aaa6e18a0f18935fa38039ca7a4a7cf16ed3074586856",
     "schema": "li259-protected-main-assets-v1"
+  },
+  "dormant_retirement": {
+    "schema": "li360-supplementary-dormant-retirement/v1",
+    "baseline_commit": "7629452aaed2ce00cbd3809114915337613deaed",
+    "source_status": "source-owned-retirement-disposition",
+    "retired_assets": [
+      {
+        "path": ".github/workflows/codex-copilot-remediation.yml",
+        "sha256": "63338c28cf75b37a0082eefc57a06619c071a8643160f0ed18395e923f7ef20b",
+        "blob": "aad4108ed290262ec08faeeedb9266c6ca368236",
+        "mode": 420
+      },
+      {
+        "path": ".github/workflows/copilot-review-refresh.yml",
+        "sha256": "d0990effed093be2e9a64a1a2a9a0370d0683d8619297d28e22a759c9ed2f394",
+        "blob": "4bc360c4a56582f61e75a75033c3bdc0ed1741ca",
+        "mode": 420
+      },
+      {
+        "path": ".github/workflows/review-request-continuation.yml",
+        "sha256": "9bcc9996400f8b36398b30b911f0bddd0c51b872a12024b64c7d43d318a461e6",
+        "blob": "a8147490bb41dfc2be81518cccdcdb9ac40b97e5",
+        "mode": 420
+      },
+      {
+        "path": ".github/workflows/review-event-reconcile.yml",
+        "sha256": "84da713ab5a5b895cd02defe18faa1e7517229264d24708e51eb8da2584e47d4",
+        "blob": "be094d83b9ab5bf9cd455f2eabd11389358591df",
+        "mode": 420
+      },
+      {
+        "path": ".github/workflows/review-infrastructure-retry.yml",
+        "sha256": "861f741f197c30805b9e8565fd085968657b8a3c3a4ada828196586fae81a6d6",
+        "blob": "21c0d4d54f06ec256fdf56c3b44b77e46556bfc2",
+        "mode": 420
+      },
+      {
+        "path": ".github/workflows/renovate-guarded-automerge.yml",
+        "sha256": "2e4feed72a41171ea95ab74699542ddd0a067707dd2bca8a0e6b8683329a974a",
+        "blob": "c6c6001ff74a0a9219adcbfc513f22a468e59c1e",
+        "mode": 420
+      },
+      {
+        "path": ".github/workflows/shared-assets-guarded-automerge.yml",
+        "sha256": "8cd3c96505dd7505d472644df2dc7c14604c634099052bda8939ee316dc880be",
+        "blob": "5d89c31fb2b5763ff20a6966774b48607b829252",
+        "mode": 420
+      },
+      {
+        "path": "scripts/review-event-reconcile.py",
+        "sha256": "d1c98071362e576e578fdfa1a215ad7bfb6bb0dde473518ae3caaddbf2f3291a",
+        "blob": "a732d17904ec9c6262a99639bc168e8502753d03",
+        "mode": 420
+      }
+    ]
   }
 }

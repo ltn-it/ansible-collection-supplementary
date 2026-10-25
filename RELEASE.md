@@ -20,11 +20,14 @@ This Ansible collection uses a reviewed, exact-SHA, fail-closed release flow.
 feature
 -> pull request to develop
 -> integration validation on develop
--> reviewed develop-to-main pull request
--> validation of the exact main SHA
--> release/vX.Y.Z pull request to main
--> exact tested main SHA release
--> release back-sync pull request to develop
+-> reviewed develop-to-main code convergence
+-> reviewed main-to-develop ancestry convergence
+-> protected-main tooling prepares exact Develop release data
+-> release/vX.Y.Z pull request to develop
+-> required checks on the prepared Develop revision
+-> reviewed develop-to-main release promotion
+-> validation and publication of the exact main SHA
+-> published-release back-sync pull request to develop
 ```
 
 Do not direct-push release commits, bypass protection, use an administrator
@@ -37,6 +40,12 @@ back-sync pull request before another promotion is opened.
 The back-sync must preserve the current `develop` tree and record the current
 protected `main` SHA as its second parent; a stale parent or changed source tree
 must fail closed.
+
+This is the normal two-stage release route. The evidence-bound Security route
+retains its separate direct-to-`main` release preparation. Normal preparation
+uses protected Main tooling with the exact bound Develop metadata and fragments;
+generator code, plugins, configuration, and role-documentation inventory must
+converge through ordinary Main review before release credentials are used.
 
 ## Validation lanes
 
@@ -60,6 +69,10 @@ commit, version, artifact name, and SHA-256 digest and prints the future Galaxy
 promotion command; it performs no Heavy or Application Acceptance execution and
 does not publish to Galaxy a second time. Cross-repository dispatch uses a short-lived
 Release Automation GitHub App token, not a long-lived personal access token.
+
+A staged candidate or a transition no-op is not Heavy or Application Acceptance
+evidence. Final acceptance still requires the applicable mandatory profiles and
+the publication and post-release checks below.
 
 ## Release eligibility
 
@@ -87,7 +100,10 @@ normal protected-branch review and checks.
 `galaxy.yml` is the version source of truth. Normal implementation pull requests
 add fragments under `changelogs/fragments/` and do not edit generated changelog
 files. Release branches run `antsibull-changelog`, update `CHANGELOG.rst`,
-`changelogs/changelog.yaml`, and `galaxy.yml`, then open a reviewed PR to `main`.
+`changelogs/changelog.yaml`, and `galaxy.yml`. Normal release preparation opens
+its reviewed PR to `develop`; the subsequent ordinary promotion supplies the
+exact release-ready Main revision. Security preparation retains its separately
+governed Main target.
 
 Choose semantic versioning from actual compatibility impact. Do not reuse or
 move a tag. Release preparation maps `breaking_changes`, `major_changes`, and
@@ -97,19 +113,28 @@ skipped, or manually overridden versions and requires the exact next stable
 version. Release PRs use merge commits only; squash and rebase merges are not
 valid release inputs.
 
+Before dispatch, compare both protected branches with the highest stable version
+actually published on GitHub and Galaxy. Resolve an outdated baseline through
+the existing reviewed convergence path; do not override the version parser or
+hand-edit generated changelogs to work around it.
+
 Before consuming the fragments, release preparation commits
 `changelogs/release-preparation.json`. The receipt binds the current and next
-versions, semantic impact, every fragment SHA-256, protected-main base SHA,
-repository identity, release bot, and exact workflow run. Publication first
-recomputes the version from the receipt-bound fragments in the base commit,
+versions, semantic impact, every fragment SHA-256, repository identity, release
+bot, and exact workflow run. A normal schema-3 receipt keeps the Develop content
+base (`base_sha` and `content_base.sha`) separate from the protected Main tooling
+source (`workflow.source_sha`); one source identity never substitutes for the
+other. Publication first recomputes the version from the receipt-bound fragments
+in the content base,
 requires the reviewed release commit to have that single parent and the exact
 bot author/committer identity, and verifies that the recorded protected-main
 preparation run completed successfully. Any mismatch stops publication before
 tag, release, or Galaxy mutation.
 
-Release preparation uses the environment-scoped `litreleasebot` credential only
-to create the reviewed release branch and pull request. Publication does not
-reuse that user credential. A generic repository `GITHUB_TOKEN` cannot provide
+Release preparation uses the existing Release Automation GitHub App installation
+token, scoped to this repository, to create the reviewed release branch and pull
+request. Publication uses its separate protected credentials. A generic
+repository `GITHUB_TOKEN` cannot provide
 stage separation because every workflow is attributed to GitHub Actions App
 `15368`. Governance blocks all `v*` creation except an exact, reviewed dedicated
 release-tag GitHub App installation. The publish job mints a repository-scoped

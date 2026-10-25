@@ -217,157 +217,6 @@ sys.exit(rc)
 """
 
 
-class ReviewOperationCASTests(unittest.TestCase):
-    def probe(self, mode, **changes):
-        claim = contracts.CopilotReviewRefreshTests._rfn("claim_review_operation")
-        self.assertEqual(
-            claim,
-            contracts.CopilotReviewRefreshTests._rerun_shell_function("claim_review_operation"),
-        )
-        script = (
-            r"""set -euo pipefail
-sleep() { :; }
-gh() { python3 "${MOCK_GH}" "$@"; }
-timeout() { while [ "$1" != gh ]; do shift; done; "$@"; }
-revalidate_refresh_state() { :; }
-validate_refresh_owner_run() { test "$2" = 77 && test "$3" = 23; }
-assert_refresh_rerun_budget() { :; }
-usable_current_review() { :; }
-read_refresh_review_state() { printf '%s' '{"event_current":true,"incomplete":0,"unresolved":0}'; }
-"""
-            + claim
-            + "\n"
-            + contracts.CopilotReviewRefreshTests._rfn("rerun_owner_if_review_current")
-            + "\nrerun_owner_if_review_current\n"
-        )
-        with tempfile.TemporaryDirectory() as tmp:
-            state, mock = Path(tmp) / "state", Path(tmp) / "mock.py"
-            state.write_text(
-                json.dumps(
-                    {
-                        "mode": mode,
-                        "oid": INITIAL,
-                        "versions": {INITIAL: {}},
-                        "markers": [],
-                        "calls": [],
-                    }
-                )
-            )
-            mock.write_text(MOCK)
-            outcomes = []
-            for worker in ("500", "501"):
-                env = {
-                    **os.environ,
-                    "STATE": str(state),
-                    "MOCK_GH": str(mock),
-                    "GITHUB_RUN_ID": worker,
-                    "GITHUB_RUN_ATTEMPT": "1",
-                    "GITHUB_EVENT_NAME": "workflow_dispatch",
-                    "GITHUB_REF_PROTECTED": "true",
-                    "GITHUB_REF": "refs/heads/develop",
-                    "GITHUB_REPOSITORY_ID": "1103407173",
-                    "LI219_EVENT_MODE": "enabled",
-                    "WORKFLOW_SHA": SOURCE,
-                    "REPOSITORY": "lightning-it/ansible-collection-supplementary",
-                    "PR_NUMBER": "23",
-                    "owner_run_id": "77",
-                    "HEAD_SHA": HEAD,
-                    "BASE_SHA": BASE,
-                    "refresh_expected_count": "0",
-                    "refresh_expected_snapshot": "null",
-                    **changes,
-                }
-                result = subprocess.run(  # noqa: S603 -- Fixed repository workflow with fixture transport.
-                    ["/bin/bash", "-c", script],
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    check=False,
-                )
-                self.assertEqual(0, result.returncode, result.stderr)
-                outcomes.append(result)
-            return json.loads(state.read_text()), outcomes
-
-    def test_hidden_marker_cannot_authorize_second_rerun(self):
-        for mode in ("consistent", "stale-ref", "lost-marker"):
-            with self.subTest(mode=mode):
-                state, _unused_value_1 = self.probe(mode)
-                self.assertEqual(1, sum(c.get("rerun", False) for c in state["calls"]))
-                self.assertEqual(1, sum(c.get("marker", False) for c in state["calls"]))
-                self.assertEqual(
-                    2 if mode == "stale-ref" else 1,
-                    sum(c.get("cas", False) for c in state["calls"]),
-                )
-                self.assertEqual(COMMITTED, state["oid"])
-                if mode == "stale-ref":
-                    second = [c for c in state["calls"] if c["worker"] == "501" and c.get("cas")]
-                    self.assertEqual(INITIAL, second[0]["input"]["expectedHeadOid"])
-
-    def test_unknown_or_partial_cas_response_consumes_without_rerun(self):
-        for mode in ("lost-cas", "partial-cas", "wrong-parent"):
-            with self.subTest(mode=mode):
-                state, outcomes = self.probe(mode)
-                self.assertEqual(COMMITTED, state["oid"])
-                self.assertEqual(1, sum(c.get("cas", False) for c in state["calls"]))
-                self.assertFalse(any(c.get("marker") or c.get("rerun") for c in state["calls"]))
-                self.assertIn("reconciliation only", outcomes[0].stderr)
-
-    def test_unknown_cas_not_applied_never_sends_rerun(self):
-        state, _unused_value_2 = self.probe("not-applied")
-        self.assertEqual(INITIAL, state["oid"])
-        self.assertEqual(2, sum(c.get("cas", False) for c in state["calls"]))
-        self.assertFalse(any(c.get("marker") or c.get("rerun") for c in state["calls"]))
-
-    def test_missing_receipt_after_confirmed_cas_stays_consumed(self):
-        state, _unused_value_3 = self.probe("invisible-marker")
-        self.assertEqual(COMMITTED, state["oid"])
-        self.assertEqual(1, sum(c.get("marker", False) for c in state["calls"]))
-        self.assertFalse(any(c.get("rerun") for c in state["calls"]))
-
-    def test_invalid_or_mixed_snapshot_and_expiry_never_mutate(self):
-        for mode in (
-            "foreign-manifest",
-            "mixed-source",
-            "missing-record-field",
-            "partial-read",
-            "truncated",
-            "expired",
-            "missing-bootstrap",
-        ):
-            with self.subTest(mode=mode):
-                state, _unused_value_4 = self.probe(mode)
-                self.assertFalse(any(c.get("cas") or c.get("marker") or c.get("rerun") for c in state["calls"]))
-
-    def test_unprotected_or_repeated_invocation_never_mutates(self):
-        for changes in (
-            {"GITHUB_EVENT_NAME": "pull_request_review"},
-            {"GITHUB_REF_PROTECTED": "false"},
-            {"GITHUB_REF": "refs/heads/feature"},
-            {"GITHUB_RUN_ATTEMPT": "2"},
-            {"WORKFLOW_SHA": "invalid"},
-        ):
-            with self.subTest(changes=changes):
-                state, _unused_value_5 = self.probe("consistent", **changes)
-                self.assertFalse(any(c.get("cas") or c.get("marker") or c.get("rerun") for c in state["calls"]))
-
-    def test_contents_write_is_limited_to_protected_dispatch_jobs(self):
-        import yaml
-
-        refresh = yaml.safe_load((ROOT / ".github/workflows/copilot-review-refresh.yml").read_text())
-        forward = refresh["jobs"]["forward-review-event"]
-        self.assertEqual("read", forward["permissions"]["contents"])
-        self.assertNotIn("checks", forward["permissions"])
-        for job in (
-            refresh["jobs"]["refresh-canonical-gate"],
-            yaml.safe_load((ROOT / ".github/workflows/current-revision-rerun.yml").read_text())["jobs"]["event-rerun"],
-        ):
-            self.assertEqual("write", job["permissions"]["contents"])
-            self.assertIn("github.event_name == 'workflow_dispatch'", job["if"])
-            self.assertIn("github.ref_protected", job["if"])
-            self.assertIn("github.actor == 'github-actions[bot]'", job["if"])
-
-
 class ReviewRequestCASTests(unittest.TestCase):
     def test_request_reservations_serialize_across_event_actions(self):
         import yaml
@@ -404,7 +253,7 @@ class ReviewRequestCASTests(unittest.TestCase):
         claim = textwrap.dedent(raw)
         self.assertEqual(
             claim.strip(),
-            contracts.CopilotReviewRefreshTests._rfn("claim_review_operation").strip(),
+            contracts.RetainedReviewContracts._rerun_shell_function("claim_review_operation").strip(),
         )
         raw = source.split("          review_exists_for_head() {\n", 1)[1].split(
             "\n  verify-current-revision-policy:", 1
@@ -447,7 +296,7 @@ marker="<!-- mlx90-copilot-request head=${EXPECTED_HEAD} -->"
             (Path(tmp) / "request-operation.sh").write_text(claim)
             # Missing original native authorization must fail closed in the new
             # deferred path. Full successful intent/consumer transport is covered
-            # by test_review_request_continuation, not fabricated in this CAS probe.
+            # by the retained seal-helper tests, not fabricated in this CAS probe.
             (Path(tmp) / "review_request_continuation.py").write_text(
                 (ROOT / "scripts/review_request_continuation.py").read_text()
             )

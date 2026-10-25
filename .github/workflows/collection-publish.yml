@@ -62,6 +62,12 @@ jobs:
       pull-requests: read
 
     steps:
+      - name: Checkout protected Main dispatch tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
       - name: Verify reviewed merge and derive publishing settings
         id: release
         env:
@@ -94,24 +100,23 @@ jobs:
           test "${#parents[@]}" -eq 2
           test "${parents[1]}" = "$REVIEWED_HEAD_SHA"
 
-          merged_galaxy="$RUNNER_TEMP/merged-galaxy.yml"
+          merged_galaxy="$GITHUB_WORKSPACE/.normal-merged-galaxy.yml"
           gh api "repos/${GITHUB_REPOSITORY}/contents/galaxy.yml?ref=${MERGE_SHA}" \
             --jq .content \
             | base64 --decode > "$merged_galaxy"
-          release_version="$(MERGED_GALAXY="$merged_galaxy" python - <<'PY'
-          import os
+          release_version="$(bash scripts/wunder-devtools-ee.sh python3 -I -c '
+          import sys
           import re
           from pathlib import Path
 
           match = re.search(
-              r"(?m)^version:\s*[\"']?([^\s\"']+)",
-              Path(os.environ["MERGED_GALAXY"]).read_text(encoding="utf-8"),
+              r"(?m)^version:\s*[\"'"'"']?([^\s\"'"'"']+)",
+              Path(sys.argv[1]).read_text(encoding="utf-8"),
           )
           if match is None:
               raise SystemExit("merged galaxy.yml has no version")
           print(match.group(1))
-          PY
-          )"
+          ' /workspace/.normal-merged-galaxy.yml)"
           if ! [[ "$release_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
             echo "Merged galaxy.yml does not contain a stable semantic version." >&2
             exit 1
@@ -128,23 +133,22 @@ jobs:
             # Ordinary product promotions retain the published release state.
             # Compare the version, rather than all galaxy metadata, and the
             # exact generated blobs before classification or any App mint.
-            parent_galaxy="$RUNNER_TEMP/parent-galaxy.yml"
+            parent_galaxy="$GITHUB_WORKSPACE/.normal-parent-galaxy.yml"
             gh api "repos/${GITHUB_REPOSITORY}/contents/galaxy.yml?ref=${parents[0]}" \
               --jq .content | base64 --decode >"$parent_galaxy"
-            parent_version="$(PARENT_GALAXY="$parent_galaxy" python -I - <<'PYVERSION'
-          import os
+            parent_version="$(bash scripts/wunder-devtools-ee.sh python3 -I -c '
+          import sys
           import re
           from pathlib import Path
 
           versions = re.findall(
-              r"(?m)^version:\s*[\"']?([^\s\"']+)[\"']?\s*$",
-              Path(os.environ["PARENT_GALAXY"]).read_text(encoding="utf-8"),
+              r"(?m)^version:\s*[\"'"'"']?([^\s\"'"'"']+)[\"'"'"']?\s*$",
+              Path(sys.argv[1]).read_text(encoding="utf-8"),
           )
           if len(versions) != 1:
               raise SystemExit("parent galaxy.yml must have exactly one version")
           print(versions[0])
-          PYVERSION
-          )"
+          ' /workspace/.normal-parent-galaxy.yml)"
             release_state_changed=false
             if [ "$parent_version" != "$release_version" ]; then
               release_state_changed=true
@@ -237,11 +241,11 @@ jobs:
         id: security
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.release_version }}
-        run: >-
-          python scripts/classify-security-release.py
-          --event-kind version
-          --version "$RELEASE_VERSION"
-          --binding-root security-binding-base
+        run: |
+          set -euo pipefail
+          classification="$(bash scripts/wunder-devtools-ee.sh python3 -B scripts/classify-security-release.py \
+            --event-kind version --version "$RELEASE_VERSION" --binding-root security-binding-base --github-output '')"
+          jq -r 'to_entries[] | "\(.key)=\(.value)"' <<<"$classification" >>"$GITHUB_OUTPUT"
 
       - name: Mint exact publish-dispatch App token
         if: steps.release.outputs.release_needed == 'true'
@@ -333,23 +337,23 @@ jobs:
           [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
           test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$RELEASE_SHA"
-          release_version="$(python - <<'PY'
+          release_version="$(bash scripts/wunder-devtools-ee.sh python3 -I -c '
           import re
           from pathlib import Path
           match = re.search(
-              r"(?m)^version:\s*[\"']?([^\s\"']+)",
+              r"(?m)^version:\s*[\"'"'"']?([^\s\"'"'"']+)",
               Path("galaxy.yml").read_text(encoding="utf-8"),
           )
           if match is None:
               raise SystemExit("galaxy.yml has no version")
           print(match.group(1))
-          PY
-          )"
-          python scripts/classify-security-release.py \
+          ')"
+          classification="$(bash scripts/wunder-devtools-ee.sh python3 -B scripts/classify-security-release.py \
             --event-kind version \
             --version "$release_version" \
             --evidence-id "$EVIDENCE_ID" \
-            --binding-root security-binding-base
+            --binding-root security-binding-base --github-output '')"
+          jq -r 'to_entries[] | "\(.key)=\(.value)"' <<<"$classification" >>"$GITHUB_OUTPUT"
       - name: Select the immutable publication runner class
         id: runner
         env:
@@ -738,12 +742,46 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
           set -euo pipefail
-          proof="$RUNNER_TEMP/normal-release-proof.json"
-          python scripts/normal_release_proof.py publish \
-            --root "$GITHUB_WORKSPACE" --control-root "$GITHUB_WORKSPACE/release-control-source" \
-            --repository "$GITHUB_REPOSITORY" --repository-id "$REPOSITORY_ID" \
-            --release "$RELEASE_SHA" --base "$REVIEWED_BASE_SHA" --head "$REVIEWED_HEAD_SHA" \
-            --archive-directory "$RUNNER_TEMP/normal-release-native" >"$proof"
+          observations="$GITHUB_WORKSPACE/.normal-native-observations"
+          fresh="$GITHUB_WORKSPACE/.normal-native-fresh"
+          bash scripts/normal_release_observations.sh publication \
+            "$observations" "$GITHUB_REPOSITORY" "$RELEASE_SHA"
+          mkdir "$RUNNER_TEMP/normal-release-ee-output"
+          # Live native proof is offline. Existing archive replay additionally
+          # needs only standard Sigstore trust-root retrieval, without credentials.
+          verifier_network=none
+          if [ "$(jq '.assets | length' "$observations/index.json")" -gt 0 ]; then
+            verifier_network=bridge
+          fi
+          WUNDER_DEVTOOLS_NETWORK="$verifier_network" bash scripts/wunder-devtools-ee.sh bash -c '
+            set -euo pipefail
+            unset GIT_DIR GIT_COMMON_DIR GIT_WORK_TREE
+            git -c safe.directory=/workspace clone --quiet --no-hardlinks --no-checkout /workspace "$HOME/release"
+            git -C "$HOME/release" checkout --quiet --detach "$1"
+            cp -a --no-preserve=ownership /workspace/release-control-source "$HOME/control"
+            mkdir "$HOME/output"
+            test -z "${GH_TOKEN:-}" && test -z "${GITHUB_TOKEN:-}"
+            python3 -B /workspace/scripts/normal_release_proof.py publish \
+              --root "$HOME/release" --control-root "$HOME/control" \
+              --repository "$2" --repository-id "$3" --release "$1" --base "$4" --head "$5" \
+              --archive-directory "$HOME/output/normal-release-native" \
+              --observation-directory /workspace/.normal-native-observations >"$HOME/output/proof.json"
+            tar -C "$HOME/output" -cf - proof.json normal-release-native
+          ' normal-native-proof "$RELEASE_SHA" "$GITHUB_REPOSITORY" "$REPOSITORY_ID" \
+            "$REVIEWED_BASE_SHA" "$REVIEWED_HEAD_SHA" | tar -xf - -C "$RUNNER_TEMP/normal-release-ee-output"
+          bash scripts/normal_release_observations.sh fresh \
+            "$fresh" "$GITHUB_REPOSITORY" "$RELEASE_SHA" "$observations"
+          bash scripts/wunder-devtools-ee.sh bash -c '
+            set -euo pipefail
+            cp -a --no-preserve=ownership /workspace/release-control-source "$HOME/control"
+            python3 -B /workspace/scripts/normal_release_proof.py freshness \
+              --root /workspace --base "$1" --control-root "$HOME/control" \
+              --repository "$2" --repository-id "$3" \
+              --observation-directory /workspace/.normal-native-observations \
+              --fresh-observation-directory /workspace/.normal-native-fresh
+          ' normal-native-freshness "$RELEASE_SHA" "$GITHUB_REPOSITORY" "$REPOSITORY_ID"
+          proof="$RUNNER_TEMP/normal-release-ee-output/proof.json"
+          mv "$RUNNER_TEMP/normal-release-ee-output/normal-release-native" "$RUNNER_TEMP/normal-release-native"
           {
             echo "PREPARATION_BASE_SHA=$(jq -er '.content_base' "$proof")"
             echo "PREPARATION_HEAD_SHA=$(jq -er '.prepared_head' "$proof")"
@@ -759,6 +797,9 @@ jobs:
         run: |
           set -euo pipefail
 
+          operation="$GITHUB_WORKSPACE/.normal-version-validation.sh"
+          trap 'rm -f -- "$operation" "$GITHUB_WORKSPACE/.normal-preparation-run.json"' EXIT
+          cat >"$operation" <<'VERIFY_VERSION'
           receipt=changelogs/release-preparation.json
           expected_version="$(jq -er '.next_version' "$receipt")"
           release_mode="$(jq -er '.release_mode' "$receipt")"
@@ -836,18 +877,35 @@ jobs:
             and .fragments == $recomputed.fragment_sha256
           ' "$receipt" >/dev/null
 
+          VERIFY_VERSION
+          bash scripts/wunder-devtools-ee.sh bash -c '
+            set -euo pipefail
+            unset GIT_DIR GIT_COMMON_DIR GIT_WORK_TREE
+            git -c safe.directory=/workspace clone --quiet --no-hardlinks --no-checkout /workspace "$HOME/release"
+            git -C "$HOME/release" checkout --quiet --detach "$1"
+            mkdir "$HOME/validation"
+            export RUNNER_TEMP="$HOME/validation" GITHUB_WORKSPACE="$HOME/release"
+            export GITHUB_REPOSITORY="$2" REPOSITORY_ID="$3" REVIEWED_BASE_SHA="$4" REVIEWED_HEAD_SHA="$5"
+            export NORMAL_TWO_STAGE="$6"
+            cd "$HOME/release"
+            source /workspace/.normal-version-validation.sh
+          ' verify-release-version "$RELEASE_SHA" "$GITHUB_REPOSITORY" "$REPOSITORY_ID" \
+            "$REVIEWED_BASE_SHA" "$REVIEWED_HEAD_SHA" "${NORMAL_TWO_STAGE:-false}"
+          receipt=changelogs/release-preparation.json
+          workflow_source="$(jq -er '.workflow.source_sha' "$receipt")"
           preparation_run_id="$(jq -er '.workflow.run_id' "$receipt")"
           preparation_attempt="$(jq -er '.workflow.run_attempt' "$receipt")"
           preparation_actor="$(jq -er '.workflow.actor' "$receipt")"
-          preparation_run="$(
-            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${preparation_run_id}"
-          )"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${preparation_run_id}" \
+            >"$GITHUB_WORKSPACE/.normal-preparation-run.json"
+          bash scripts/wunder-devtools-ee.sh bash -c '
+            set -euo pipefail
           jq -e \
-            --arg repository "$GITHUB_REPOSITORY" \
-            --arg base_sha "$workflow_source" \
-            --arg run_id "$preparation_run_id" \
-            --arg run_attempt "$preparation_attempt" \
-            --arg actor "$preparation_actor" '
+            --arg repository "$1" \
+            --arg base_sha "$2" \
+            --arg run_id "$3" \
+            --arg run_attempt "$4" \
+            --arg actor "$5" '"'"'
             (.id | tostring) == $run_id
             and (.run_attempt | tostring) == $run_attempt
             and .repository.full_name == $repository
@@ -859,7 +917,9 @@ jobs:
             and .actor.login == $actor
             and .status == "completed"
             and .conclusion == "success"
-          ' <<< "$preparation_run" >/dev/null
+          '"'"' "/workspace/.normal-preparation-run.json" >/dev/null
+          ' verify-preparation-producer "$GITHUB_REPOSITORY" "$workflow_source" \
+            "$preparation_run_id" "$preparation_attempt" "$preparation_actor"
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
@@ -890,6 +950,10 @@ jobs:
           REQUEST_CREATE_GITHUB_RELEASE: ${{ inputs.create_github_release }}
           REQUEST_PUBLISH_GALAXY: ${{ inputs.publish_galaxy }}
         run: |
+          set -euo pipefail
+          operation="$GITHUB_WORKSPACE/.normal-candidate-validation.sh"
+          trap 'rm -f -- "$operation"' EXIT
+          cat >"$operation" <<'VALIDATE_CANDIDATE'
           set -euo pipefail
 
           mapfile -t candidates < <(
@@ -1075,7 +1139,16 @@ jobs:
             cd incoming/evidence/long-term
             sha256sum --check "collection-release-evidence-${RELEASE_SHA}.tar.gz.sha256"
           )
-
+          VALIDATE_CANDIDATE
+          bash scripts/wunder-devtools-ee.sh bash -c '
+            set -euo pipefail
+            export CI_RUN_ID="$1" CI_RUN_ATTEMPT="$2" RELEASE_SHA="$3" GITHUB_REPOSITORY="$4"
+            export REQUEST_CREATE_GITHUB_RELEASE="$5" REQUEST_PUBLISH_GALAXY="$6"
+            export GITHUB_ENV="$HOME/release-environment"
+            source /workspace/.normal-candidate-validation.sh >&2
+            cat "$GITHUB_ENV"
+          ' candidate-validation "$CI_RUN_ID" "$CI_RUN_ATTEMPT" "$RELEASE_SHA" "$GITHUB_REPOSITORY" \
+            "$REQUEST_CREATE_GITHUB_RELEASE" "$REQUEST_PUBLISH_GALAXY" >>"$GITHUB_ENV"
       - name: Classify exact-SHA Security release metadata
         run: |
           set -euo pipefail
@@ -1100,11 +1173,14 @@ jobs:
 
       - name: Install exact candidate in a clean collection path
         run: |
+          WUNDER_DEVTOOLS_NETWORK=bridge bash scripts/wunder-devtools-ee.sh bash -c '
+            set -euo pipefail
+            test -z "${GH_TOKEN:-}" && test -z "${GITHUB_TOKEN:-}"
           set -euo pipefail
-          install_root="$RUNNER_TEMP/candidate-install"
+          install_root="$HOME/candidate-install"
           rm -rf "$install_root"
           ansible-galaxy collection install \
-            "incoming/candidate/${CANDIDATE_NAME}" \
+            "incoming/candidate/$1" \
             -p "$install_root" \
             --force
           ANSIBLE_COLLECTIONS_PATH="$install_root" \
@@ -1114,13 +1190,16 @@ jobs:
           ANSIBLE_COLLECTIONS_PATH="$install_root" \
             ansible-playbook --syntax-check "$installed_playbook"
 
+          ' collection-install "$CANDIDATE_NAME" "$RELEASE_VERSION"
       - name: Verify signatures and attestations; download attestation bundles
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
-          CANDIDATE="incoming/candidate/${CANDIDATE_NAME}" python - <<'PY'
+          sbom_check="$GITHUB_WORKSPACE/.normal-sbom-validation.py"
+          trap 'rm -f -- "$sbom_check"' EXIT
+          cat >"$sbom_check" <<'PY'
           import hashlib
           import json
           import os
@@ -1190,6 +1269,11 @@ jobs:
           ):
               raise SystemExit("provenance does not bind the exact collection release")
           PY
+          bash scripts/wunder-devtools-ee.sh bash -c '
+            set -euo pipefail
+            export CANDIDATE="incoming/candidate/$1" RELEASE_VERSION="$2" RELEASE_SHA="$3" GITHUB_REPOSITORY="$4"
+            python3 -I /workspace/.normal-sbom-validation.py
+          ' sbom-validation "$CANDIDATE_NAME" "$RELEASE_VERSION" "$RELEASE_SHA" "$GITHUB_REPOSITORY"
 
           identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/collection-ci.yml@refs/heads/main"
           subjects=(
@@ -1203,17 +1287,6 @@ jobs:
           for subject in "${subjects[@]}"; do
             signature_bundle="incoming/evidence/release-assets/$(basename "$subject").sigstore.json"
             test -s "$signature_bundle"
-            cosign verify-blob \
-              --bundle "$signature_bundle" \
-              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-              --certificate-identity "$identity" \
-              --certificate-github-workflow-sha "$RELEASE_SHA" \
-              "$subject"
-            gh attestation verify "$subject" \
-              --repo "$GITHUB_REPOSITORY" \
-              --cert-identity "$identity" \
-              --source-ref refs/heads/main \
-              --source-digest "$RELEASE_SHA"
 
             subject_path="$(realpath "$subject")"
             bundle_dir="dist/attestation-download/$(basename "$subject")"
@@ -1226,10 +1299,39 @@ jobs:
             test "${#bundles[@]}" -eq 1
             cp "${bundles[0]}" \
               "dist/attestation-bundles/$(basename "$subject").attestation.jsonl"
+            if [ "${NORMAL_TWO_STAGE:-false}" = true ]; then
+              WUNDER_DEVTOOLS_NETWORK=bridge bash scripts/wunder-devtools-ee.sh bash -c '
+                set -euo pipefail
+                test -z "${GH_TOKEN:-}" && test -z "${GITHUB_TOKEN:-}"
+                cosign verify-blob --bundle "$2" \
+                  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+                  --certificate-identity "$3" --certificate-github-workflow-sha "$4" "$1"
+                gh attestation verify "$1" --bundle "$6" --repo "$5" \
+                  --cert-identity "$3" --source-ref refs/heads/main --source-digest "$4"
+              ' normal-candidate-crypto "$subject" "$signature_bundle" "$identity" "$RELEASE_SHA" \
+                "$GITHUB_REPOSITORY" "dist/attestation-bundles/$(basename "$subject").attestation.jsonl"
+            else
+            cosign verify-blob \
+              --bundle "$signature_bundle" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              --certificate-identity "$identity" \
+              --certificate-github-workflow-sha "$RELEASE_SHA" \
+              "$subject"
+            gh attestation verify "$subject" \
+              --repo "$GITHUB_REPOSITORY" \
+              --cert-identity "$identity" \
+              --source-ref refs/heads/main \
+              --source-digest "$RELEASE_SHA"
+
+            fi
           done
 
       - name: Assemble verified release attachments
         run: |
+          set -euo pipefail
+          operation="$GITHUB_WORKSPACE/.normal-release-assembly.sh"
+          trap 'rm -f -- "$operation"' EXIT
+          cat >"$operation" <<'ASSEMBLE_RELEASE'
           set -euo pipefail
 
           mkdir -p dist/release
@@ -1261,6 +1363,17 @@ jobs:
             sha256sum --check ci-release-assets-SHA256SUMS
           )
 
+          ASSEMBLE_RELEASE
+          bash scripts/wunder-devtools-ee.sh bash -c '
+            set -euo pipefail
+            export CANDIDATE_NAME="$1"
+            mkdir -p "$HOME/stage/dist"
+            ln -s /workspace/incoming "$HOME/stage/incoming"
+            ln -s /workspace/dist/attestation-bundles "$HOME/stage/dist/attestation-bundles"
+            cd "$HOME/stage"
+            source /workspace/.normal-release-assembly.sh >&2
+            tar -cf - dist/release
+          ' assemble-release "$CANDIDATE_NAME" | tar -xf -
       - name: Retain authenticated normal publication observations
         if: env.NORMAL_TWO_STAGE == 'true'
         run: |
@@ -1289,7 +1402,8 @@ jobs:
             test -s "$ATTESTATION_BUNDLE"
             cp "$ATTESTATION_BUNDLE" dist/release/normal-release-native-evidence.sigstore.json
           fi
-          python scripts/normal_release_archive.py \
+          WUNDER_DEVTOOLS_NETWORK=bridge bash scripts/wunder-devtools-ee.sh \
+            python3 -B scripts/normal_release_archive.py \
             --snapshot dist/release/normal-release-native-evidence.json \
             --bundle dist/release/normal-release-native-evidence.sigstore.json \
             --repository "$GITHUB_REPOSITORY" --repository-id "$REPOSITORY_ID" --release "$RELEASE_SHA"
@@ -1558,6 +1672,147 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          if [ "${NORMAL_TWO_STAGE:-false}" = true ]; then
+            # Normal release EE transport; no credentials enter the validator.
+          set -euo pipefail
+          bash scripts/wunder-devtools-ee.sh bash -c '
+            set -euo pipefail
+            cd dist/release
+            find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '"'"'%f\n'"'"' \
+              | sort | xargs sha256sum
+          ' >dist/release/SHA256SUMS
+          bash scripts/wunder-devtools-ee.sh bash -c '
+            set -euo pipefail
+            cd dist/release
+            test -s SHA256SUMS
+            sha256sum --check SHA256SUMS
+          '
+          publish_identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/collection-publish.yml@refs/heads/main"
+          release_response="$RUNNER_TEMP/existing-release-for-checksum-bundle.json"
+          release_status="$(
+            curl --silent --show-error --location \
+              --output "$release_response" \
+              --write-out '%{http_code}' \
+              --header 'Accept: application/vnd.github+json' \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}"
+          )"
+          case "$release_status" in
+            404)
+              checksum_asset_count=0
+              bundle_asset_count=0
+              ;;
+            200)
+              checksum_asset_count="$(
+                jq '[.assets[] | select(.name == "SHA256SUMS")] | length' \
+                  "$release_response"
+              )"
+              bundle_asset_count="$(
+                jq '[.assets[] | select(.name == "SHA256SUMS.sigstore.json")] | length' \
+                  "$release_response"
+              )"
+              ;;
+            *)
+              echo "Unexpected GitHub Release lookup status: $release_status" >&2
+              exit 1
+              ;;
+          esac
+          test "$checksum_asset_count" -le 1
+          test "$bundle_asset_count" -le 1
+          test "$checksum_asset_count" -eq "$bundle_asset_count"
+          if [ "$checksum_asset_count" -eq 1 ]; then
+            existing_pair="$GITHUB_WORKSPACE/.normal-existing-checksum-pair"
+            mkdir -p "$existing_pair"
+            gh release download "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern SHA256SUMS \
+              --pattern SHA256SUMS.sigstore.json \
+              --dir "$existing_pair"
+            bash scripts/wunder-devtools-ee.sh cmp --silent \
+              .normal-existing-checksum-pair/SHA256SUMS dist/release/SHA256SUMS
+            cp "$existing_pair/SHA256SUMS.sigstore.json" \
+              dist/release/SHA256SUMS.sigstore.json
+          else
+            if [ "${LEGACY_NORMAL_RECHECK:-false}" = true ]; then
+              echo 'Legacy normal recheck requires the existing signed checksum pair.' >&2
+              exit 1
+            fi
+            cosign sign-blob --yes \
+              --bundle dist/release/SHA256SUMS.sigstore.json \
+              dist/release/SHA256SUMS
+          fi
+          if [ "${NORMAL_TWO_STAGE:-false}" = true ]; then
+            WUNDER_DEVTOOLS_NETWORK=bridge bash scripts/wunder-devtools-ee.sh cosign verify-blob \
+              --bundle dist/release/SHA256SUMS.sigstore.json \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              --certificate-identity "$publish_identity" --certificate-github-workflow-sha "$RELEASE_SHA" \
+              dist/release/SHA256SUMS
+          else
+          cosign verify-blob \
+            --bundle dist/release/SHA256SUMS.sigstore.json \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "$publish_identity" \
+            --certificate-github-workflow-sha "$RELEASE_SHA" \
+            dist/release/SHA256SUMS
+          fi
+
+          notes_program="$GITHUB_WORKSPACE/.normal-release-notes.py"
+          trap 'rm -f -- "$notes_program"' EXIT
+          cat >"$notes_program" <<'PY'
+          import os
+          import sys
+          import re
+          from pathlib import Path
+
+          version = os.environ["RELEASE_VERSION"]
+          lines = Path("CHANGELOG.rst").read_text(encoding="utf-8").splitlines()
+          start = next((index for index, line in enumerate(lines) if line.strip() == f"v{version}"), None)
+          if start is None:
+              raise SystemExit(f"CHANGELOG.rst has no v{version} section")
+          end = len(lines)
+          for index in range(start + 1, len(lines)):
+              if re.fullmatch(r"v[0-9]+(?:\.[0-9]+){2}(?:[-.][0-9A-Za-z.-]+)?", lines[index].strip()):
+                  end = index
+                  break
+          notes = "\n".join(lines[start:end]).strip() + "\n"
+          if len(notes.splitlines()) < 3:
+              raise SystemExit(f"CHANGELOG.rst v{version} section is empty")
+          if os.environ["SECURITY_RELEASE"] == "true":
+              import json
+
+              evidence = json.loads(
+                  Path("dist/release/security-release-evidence.json").read_text(
+                      encoding="utf-8"
+                  )
+              )
+              evidence_id = evidence["metadata"]["id"]
+              identifiers = ", ".join(
+                  f"``{identifier}``"
+                  for identifier in evidence["security"]["identifiers"]
+              )
+              evidence_url = (
+                  f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/"
+                  f"download/{os.environ['RELEASE_TAG']}/security-release-evidence.json"
+              )
+              notes += (
+                  "\nSecurity release evidence\n"
+                  "-------------------------\n\n"
+                  f"* Evidence ID: ``{evidence_id}``\n"
+                  f"* Security identifiers: {identifiers}\n"
+                  f"* Evidence: `{evidence_id} <{evidence_url}>`_\n"
+              )
+          sys.stdout.write(notes)
+          PY
+          bash scripts/wunder-devtools-ee.sh bash -c '
+            set -euo pipefail
+            export RELEASE_VERSION="$1" SECURITY_RELEASE="$2" GITHUB_REPOSITORY="$3" RELEASE_TAG="$4"
+            python3 -I /workspace/.normal-release-notes.py
+          ' release-notes "$RELEASE_VERSION" "$SECURITY_RELEASE" "$GITHUB_REPOSITORY" "$RELEASE_TAG" \
+            >dist/release-notes.rst
+          else
+            # Preserved legacy and Security publication implementation.
+          set -euo pipefail
           (
             cd dist/release
             checksum_file="$RUNNER_TEMP/publish-release-assets-SHA256SUMS"
@@ -1673,12 +1928,49 @@ jobs:
               )
           Path("dist/release-notes.rst").write_text(notes, encoding="utf-8")
           PY
+          fi
 
       - name: Require configured publication credentials
         if: env.SECURITY_RELEASE != 'true' || env.GALAXY_REQUIRED != 'true'
         env:
           GALAXY_API_TOKEN: ${{ secrets.ANSIBLE_GALAXY_API_KEY }}
         run: |
+          set -euo pipefail
+          if [ "${NORMAL_TWO_STAGE:-false}" = true ]; then
+            # Normal release EE transport; no credentials enter the validator.
+          set -euo pipefail
+          if [ "$GALAXY_REQUIRED" = true ]; then
+            test -n "${GALAXY_API_TOKEN:-}"
+            candidate_sha="$(
+              bash scripts/wunder-devtools-ee.sh sha256sum "incoming/candidate/${CANDIDATE_NAME}" | awk '{print $1}'
+            )"
+            version_url="https://galaxy.ansible.com/api/v3/plugin/ansible/content/published/collections/index/lit/supplementary/versions/${RELEASE_VERSION}/"
+            response="$RUNNER_TEMP/galaxy-preflight.json"
+            status="$(
+              curl --silent --show-error \
+                --output "$response" \
+                --write-out '%{http_code}' \
+                "$version_url"
+            )"
+            if [ "$status" = 200 ]; then
+              cp "$response" "$GITHUB_WORKSPACE/.normal-galaxy-response.json"
+              bash scripts/wunder-devtools-ee.sh python3 -I -c '
+          import json, sys
+          from pathlib import Path
+          payload = json.loads(Path(".normal-galaxy-response.json").read_text())
+          artifact = payload.get("artifact") or {}
+          if artifact.get("filename") != sys.argv[1]:
+              raise SystemExit("existing Galaxy artifact filename mismatch")
+          if artifact.get("sha256") != sys.argv[2]:
+              raise SystemExit("existing Galaxy artifact digest mismatch")
+          ' "$CANDIDATE_NAME" "$candidate_sha"
+            elif [ "$status" != 404 ]; then
+              echo "Unexpected Galaxy preflight API status: $status" >&2
+              exit 1
+            fi
+          fi
+          else
+            # Preserved legacy and Security publication implementation.
           set -euo pipefail
           if [ "$GALAXY_REQUIRED" = true ]; then
             test -n "${GALAXY_API_TOKEN:-}"
@@ -1710,6 +2002,7 @@ jobs:
               echo "Unexpected Galaxy preflight API status: $status" >&2
               exit 1
             fi
+          fi
           fi
 
       - name: Mint exact repository-scoped release-tag App token
@@ -1771,6 +2064,93 @@ jobs:
           APP_SLUG: ${{ steps.release-tag-token.outputs.app-slug }}
           GH_TOKEN: ${{ steps.release-tag-token.outputs.token }}
         run: |
+          set -euo pipefail
+          if [ "${NORMAL_TWO_STAGE:-false}" = true ]; then
+            # Normal release EE transport; no credentials enter the validator.
+          set -euo pipefail
+
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test -n "$current_main"
+          test "$current_main" = "$RELEASE_SHA"
+
+          app_bot_id="$(gh api "/users/${APP_SLUG}[bot]" --jq .id)"
+          [[ "$app_bot_id" =~ ^[1-9][0-9]*$ ]]
+          app_bot_name="${APP_SLUG}[bot]"
+          app_bot_email="${app_bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+
+          remote_tag="$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}" | awk '{print $1}')"
+          if [ -n "$remote_tag" ]; then
+            git fetch --no-tags origin "refs/tags/${RELEASE_TAG}"
+            test "$(git cat-file -t FETCH_HEAD)" = tag
+            tagged_sha="$(git rev-parse 'FETCH_HEAD^{commit}')"
+            test "$tagged_sha" = "$RELEASE_SHA"
+            tag_payload="$RUNNER_TEMP/existing-release-tag.txt"
+            git cat-file tag FETCH_HEAD > "$tag_payload"
+              cp "$tag_payload" "$GITHUB_WORKSPACE/.normal-existing-tag.txt"
+              tag_program="$GITHUB_WORKSPACE/.normal-existing-tag.py"
+              cat >"$tag_program" <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          payload = Path(os.environ["TAG_PAYLOAD"]).read_text(encoding="utf-8")
+          headers, separator, message = payload.partition("\n\n")
+          if not separator:
+              raise SystemExit("existing release tag has no annotation")
+          expected = {
+              f"object {os.environ['RELEASE_SHA']}",
+              "type commit",
+              f"tag {os.environ['RELEASE_TAG']}",
+          }
+          lines = headers.splitlines()
+          if not expected.issubset(set(lines)):
+              raise SystemExit("existing annotated tag identity differs from the release")
+          taggers = [line for line in lines if line.startswith("tagger ")]
+          expected_tagger = (
+              f"tagger {os.environ['EXPECTED_TAGGER_NAME']} "
+              f"<{os.environ['EXPECTED_TAGGER_EMAIL']}> "
+          )
+          if len(taggers) != 1 or re.fullmatch(
+              re.escape(expected_tagger) + r"[0-9]+ [+-][0-9]{4}", taggers[0]
+          ) is None:
+              raise SystemExit("existing release tag has an unauthorized tagger identity")
+          if message.rstrip("\n") != f"Release {os.environ['RELEASE_TAG']}":
+              raise SystemExit("existing release tag annotation differs")
+          PY
+              bash scripts/wunder-devtools-ee.sh bash -c '
+                set -euo pipefail
+                export TAG_PAYLOAD=/workspace/.normal-existing-tag.txt
+                export RELEASE_SHA="$1" RELEASE_TAG="$2" EXPECTED_TAGGER_EMAIL="$3" EXPECTED_TAGGER_NAME="$4"
+                python3 -I /workspace/.normal-existing-tag.py
+              ' existing-tag "$RELEASE_SHA" "$RELEASE_TAG" "$app_bot_email" "$app_bot_name"
+          else
+            if [ "${LEGACY_NORMAL_RECHECK:-false}" = true ]; then
+              echo 'Legacy normal recheck cannot create a tag.' >&2
+              exit 1
+            fi
+            tag_object="$(
+              gh api --method POST \
+                "repos/${GITHUB_REPOSITORY}/git/tags" \
+                -f tag="$RELEASE_TAG" \
+                -f message="Release ${RELEASE_TAG}" \
+                -f object="$RELEASE_SHA" \
+                -f type=commit \
+                -f "tagger[name]=${app_bot_name}" \
+                -f "tagger[email]=${app_bot_email}" \
+                -f "tagger[date]=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                --jq .sha
+            )"
+            test -n "$tag_object"
+            gh api --method POST \
+              "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${RELEASE_TAG}" \
+              -f sha="$tag_object" >/dev/null
+            git fetch --no-tags origin "refs/tags/${RELEASE_TAG}"
+            test "$(git cat-file -t FETCH_HEAD)" = tag
+            test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$RELEASE_SHA"
+          fi
+          else
+            # Preserved legacy and Security publication implementation.
           set -euo pipefail
 
           current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
@@ -1847,12 +2227,120 @@ jobs:
             test "$(git cat-file -t FETCH_HEAD)" = tag
             test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$RELEASE_SHA"
           fi
+          fi
 
       - name: Create or verify GitHub Release and immutable assets
         if: env.SECURITY_RELEASE != 'true' || env.GALAXY_REQUIRED != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+          if [ "${NORMAL_TWO_STAGE:-false}" = true ]; then
+            # Normal release EE transport; no credentials enter the validator.
+          set -euo pipefail
+
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test -n "$current_main"
+          test "$current_main" = "$RELEASE_SHA"
+
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null; then
+            release_state="$(
+              gh release view "$RELEASE_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --json body,isDraft,isPrerelease,name,tagName
+            )"
+            jq -e --arg tag "$RELEASE_TAG" '
+              .tagName == $tag
+              and .name == $tag
+              and .isDraft == false
+              and .isPrerelease == false
+            ' <<< "$release_state" >/dev/null
+            release_state_path="$GITHUB_WORKSPACE/.normal-existing-release.json"
+            printf '%s\n' "$release_state" > "$release_state_path"
+            body_program="$GITHUB_WORKSPACE/.normal-release-body.py"
+            trap 'rm -f -- "$body_program"' EXIT
+            cat >"$body_program" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          state = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          expected = Path("dist/release-notes.rst").read_text(encoding="utf-8").rstrip()
+          if str(state.get("body", "")).rstrip() != expected:
+              raise SystemExit("existing GitHub Release notes differ from the changelog")
+          PY
+            bash scripts/wunder-devtools-ee.sh python3 -I .normal-release-body.py .normal-existing-release.json
+          else
+            if [ "${LEGACY_NORMAL_RECHECK:-false}" = true ]; then
+              echo 'Legacy normal recheck cannot create a GitHub Release.' >&2
+              exit 1
+            fi
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title "$RELEASE_TAG" \
+              --notes-file dist/release-notes.rst
+          fi
+
+          assets_json="$(
+            gh release view "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json assets
+          )"
+          asset_index=0
+          while IFS= read -r asset; do
+            asset_index=$((asset_index + 1))
+            name="$(basename "$asset")"
+            if jq -e --arg name "$name" \
+              '.assets | any(.name == $name)' <<< "$assets_json" >/dev/null
+            then
+              verify_dir="$GITHUB_WORKSPACE/.normal-existing-release-asset-${asset_index}"
+              mkdir -p "$verify_dir"
+              gh release download "$RELEASE_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --pattern "$name" \
+                --dir "$verify_dir"
+              bash scripts/wunder-devtools-ee.sh cmp \
+                ".normal-existing-release-asset-${asset_index}/$name" "$asset"
+            else
+              if [ "${LEGACY_NORMAL_RECHECK:-false}" = true ]; then
+                echo 'Legacy normal recheck cannot add missing GitHub Release assets.' >&2
+                exit 1
+              fi
+              gh release upload "$RELEASE_TAG" "$asset" \
+                --repo "$GITHUB_REPOSITORY"
+            fi
+          done < <(find dist/release -maxdepth 1 -type f -print | sort)
+
+          local_assets="$(
+            find dist/release -maxdepth 1 -type f -printf '%f\n' | sort
+          )"
+          remote_assets="$(
+            gh release view "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json assets \
+              --jq '.assets[].name | select(
+                . != "post-release-verification.json"
+                and . != "post-release-verification.json.sigstore.json"
+              )' \
+              | sort
+          )"
+          bash scripts/wunder-devtools-ee.sh bash -c 'test "$1" = "$2"' \
+            release-assets "$remote_assets" "$local_assets"
+
+          post_asset_count="$(
+            gh release view "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json assets \
+              --jq '[.assets[].name | select(
+                . == "post-release-verification.json"
+                or . == "post-release-verification.json.sigstore.json"
+              )] | length'
+          )"
+          bash scripts/wunder-devtools-ee.sh bash -c 'test "$1" -eq 0 || test "$1" -eq 2' \
+            completion-pair "$post_asset_count"
+          else
+            # Preserved legacy and Security publication implementation.
           set -euo pipefail
 
           current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
@@ -1950,6 +2438,7 @@ jobs:
               )] | length'
           )"
           test "$post_asset_count" -eq 0 || test "$post_asset_count" -eq 2
+          fi
 
       - name: Revalidate exact CI producer before Galaxy publication
         if: env.SECURITY_RELEASE != 'true' || env.GALAXY_REQUIRED != 'true'
@@ -1964,6 +2453,115 @@ jobs:
         env:
           GALAXY_API_TOKEN: ${{ secrets.ANSIBLE_GALAXY_API_KEY }}
         run: |
+          set -euo pipefail
+          if [ "${NORMAL_TWO_STAGE:-false}" = true ]; then
+            # Normal release EE transport; no credentials enter the validator.
+          set -euo pipefail
+
+          candidate="incoming/candidate/${CANDIDATE_NAME}"
+          candidate_sha="$(bash scripts/wunder-devtools-ee.sh sha256sum "$candidate" | awk '{print $1}')"
+          if [ "$SECURITY_RELEASE" = true ]; then
+            test -s "$MODULIX_VALIDATION_RECEIPT"
+            test -s "${MODULIX_VALIDATION_RECEIPT}.sigstore.json"
+            test "$MODULIX_VALIDATION_RECEIPT_SHA256" = \
+              "sha256:$(sha256sum "$MODULIX_VALIDATION_RECEIPT" | awk '{print $1}')"
+            jq -e \
+              --arg digest "sha256:$candidate_sha" \
+              --arg repository "$GITHUB_REPOSITORY" \
+              --arg request_id "$MODULIX_VALIDATION_REQUEST_ID" \
+              --arg run_attempt "$MODULIX_VALIDATION_RUN_ATTEMPT" \
+              --arg run_id "$MODULIX_VALIDATION_RUN_ID" \
+              --arg sha "$RELEASE_SHA" '
+              .apiVersion == "lit.mlx90.collection-validation-receipt/v2"
+              and .kind == "CollectionValidationReceipt"
+              and .request.source.repository == $repository
+              and .request.source.sha == $sha
+              and .request.source.actor == "lightning-it-release-automation[bot]"
+              and .request.source.actorId == 307565056
+              and .request.source.actorType == "Bot"
+              and .request.source.event == "workflow_dispatch"
+              and .request.source.ref == "refs/heads/main"
+              and (.request.source.runId | tostring) == env.GITHUB_RUN_ID
+              and (.request.source.runAttempt | tostring) == env.GITHUB_RUN_ATTEMPT
+              and .request.candidate.sha256 == $digest
+              and .request.security.humanActions == 0
+              and .requestId == $request_id
+              and (.validation.runId | tostring) == $run_id
+              and (.validation.runAttempt | tostring) == $run_attempt
+              and .validation.actor == "lightning-it-release-automation[bot]"
+              and .validation.actorId == 307565056
+              and .validation.actorType == "Bot"
+              and .validation.humanActions == 0
+              and .validation.conclusion == "success"
+              and .decision.candidateUnchanged == true
+              and .decision.galaxyPublicationAuthorized == true
+              and .decision.releaseEligible == true
+            ' "$MODULIX_VALIDATION_RECEIPT" >/dev/null
+          fi
+          version_url="https://galaxy.ansible.com/api/v3/plugin/ansible/content/published/collections/index/lit/supplementary/versions/${RELEASE_VERSION}/"
+          response="$RUNNER_TEMP/galaxy-version.json"
+          status="$(
+            curl --silent --show-error \
+              --output "$response" \
+              --write-out '%{http_code}' \
+              "$version_url"
+          )"
+
+          if [ "$status" = 404 ]; then
+            if [ "${LEGACY_NORMAL_RECHECK:-false}" = true ]; then
+              echo 'Legacy normal recheck cannot create a Galaxy version.' >&2
+              exit 1
+            fi
+            ansible-galaxy collection publish "$candidate" \
+              --api-key "$GALAXY_API_TOKEN"
+          elif [ "$status" != 200 ]; then
+            echo "Unexpected Galaxy version API status: $status" >&2
+            exit 1
+          fi
+
+          for attempt in $(seq 1 60); do
+            status="$(
+              curl --silent --show-error \
+                --output "$response" \
+                --write-out '%{http_code}' \
+                "$version_url"
+            )"
+            if [ "$status" = 200 ]; then
+              break
+            fi
+            if [ "$status" != 404 ]; then
+              echo "Unexpected Galaxy verification status: $status" >&2
+              exit 1
+            fi
+            echo "Waiting for Galaxy import (attempt $attempt/60)."
+            sleep 10
+          done
+          test "$status" = 200
+
+          cp "$response" "$GITHUB_WORKSPACE/.normal-galaxy-response.json"
+          galaxy_download_url="$(bash scripts/wunder-devtools-ee.sh python3 -I -c '
+          import json
+          import sys
+          from pathlib import Path
+
+          payload = json.loads(Path(".normal-galaxy-response.json").read_text())
+          artifact = payload.get("artifact") or {}
+          if artifact.get("filename") != sys.argv[1]:
+              raise SystemExit("Galaxy artifact filename mismatch")
+          if artifact.get("sha256") != sys.argv[2]:
+              raise SystemExit("Galaxy artifact digest mismatch")
+          download_url = payload.get("download_url")
+          if not isinstance(download_url, str) or not download_url.startswith("https://"):
+              raise SystemExit("Galaxy download URL is missing or unsafe")
+          print(download_url)
+          ' "$CANDIDATE_NAME" "$candidate_sha")"
+
+          curl --fail --location --silent --show-error \
+            --output "$GITHUB_WORKSPACE/.normal-galaxy-artifact" "$galaxy_download_url"
+          bash scripts/wunder-devtools-ee.sh cmp \
+            .normal-galaxy-artifact "incoming/candidate/${CANDIDATE_NAME}"
+          else
+            # Preserved legacy and Security publication implementation.
           set -euo pipefail
 
           candidate="incoming/candidate/${CANDIDATE_NAME}"
@@ -2069,6 +2667,7 @@ jobs:
             "$galaxy_download_url"
           test "$(sha256sum "$RUNNER_TEMP/galaxy-${CANDIDATE_NAME}" | awk '{print $1}')" = \
             "$candidate_sha"
+          fi
 
       - name: Verify GitHub Release download, install, and smoke
         if: env.SECURITY_RELEASE != 'true' || env.GALAXY_REQUIRED != 'true'
@@ -2076,6 +2675,96 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY_ID: ${{ github.repository_id }}
         run: |
+          set -euo pipefail
+          if [ "${NORMAL_TWO_STAGE:-false}" = true ]; then
+            # Normal release EE transport; no credentials enter the validator.
+          set -euo pipefail
+
+          verify_root="$GITHUB_WORKSPACE/.normal-release-readback"
+          export install_root="$RUNNER_TEMP/github-release-install"
+          mkdir -p "$verify_root"
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir "$verify_root"
+          operation="$GITHUB_WORKSPACE/.normal-readback-validation.sh"
+          trap 'rm -f -- "$operation"' EXIT
+          cat >"$operation" <<'VERIFY_READBACK'
+          (
+            cd "$verify_root"
+            sha256sum --check SHA256SUMS
+          )
+          publish_identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/collection-publish.yml@refs/heads/main"
+          cosign verify-blob \
+            --bundle "$verify_root/SHA256SUMS.sigstore.json" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "$publish_identity" \
+            --certificate-github-workflow-sha "$RELEASE_SHA" \
+            "$verify_root/SHA256SUMS"
+          test "$(sha256sum "$verify_root/$CANDIDATE_NAME" | awk '{print $1}')" = \
+            "$(sha256sum "incoming/candidate/$CANDIDATE_NAME" | awk '{print $1}')"
+          if [ "${NORMAL_TWO_STAGE:-false}" = true ]; then
+            python scripts/normal_release_archive.py \
+              --snapshot "$verify_root/normal-release-native-evidence.json" \
+              --bundle "$verify_root/normal-release-native-evidence.sigstore.json" \
+              --repository "$GITHUB_REPOSITORY" --repository-id "$REPOSITORY_ID" --release "$RELEASE_SHA"
+          fi
+          if [ "$SECURITY_RELEASE" = true ]; then
+            python scripts/generate-security-release-evidence.py verify \
+              --metadata "$SECURITY_METADATA" \
+              --profiles .lit/security-release-profiles.json \
+              --source-sha "$RELEASE_SHA" \
+              --artifact "$verify_root/$CANDIDATE_NAME" \
+              --signature "$verify_root/$CANDIDATE_NAME.sigstore.json" \
+              --sbom "$verify_root/sbom.cdx.json" \
+              --provenance "$verify_root/provenance.json" \
+              --evidence "$verify_root/security-release-evidence.json"
+            cosign verify-blob \
+              --bundle "$verify_root/security-release-evidence.json.sigstore.json" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              --certificate-identity "$publish_identity" \
+              --certificate-github-workflow-sha "$RELEASE_SHA" \
+              "$verify_root/security-release-evidence.json"
+            gh attestation verify "$verify_root/security-release-evidence.json" \
+              --repo "$GITHUB_REPOSITORY" \
+              --cert-identity "$publish_identity" \
+              --source-ref refs/heads/main \
+              --source-digest "$RELEASE_SHA"
+            candidate_identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/collection-ci.yml@refs/heads/main"
+            cosign verify-blob \
+              --bundle "$verify_root/$CANDIDATE_NAME.sigstore.json" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              --certificate-identity "$candidate_identity" \
+              --certificate-github-workflow-sha "$RELEASE_SHA" \
+              "$verify_root/$CANDIDATE_NAME"
+          fi
+          ansible-galaxy collection install \
+            "$verify_root/$CANDIDATE_NAME" \
+            -p "$install_root" \
+            --force
+          ANSIBLE_COLLECTIONS_PATH="$install_root" \
+            ansible-doc --type role lit.supplementary.keycloak_deploy >/dev/null
+          installed_playbook="$install_root/ansible_collections/lit/supplementary/playbooks/example.yml"
+          test -s "$installed_playbook"
+          ANSIBLE_COLLECTIONS_PATH="$install_root" \
+            ansible-playbook --syntax-check "$installed_playbook"
+          VERIFY_READBACK
+          if [ "${NORMAL_TWO_STAGE:-false}" = true ]; then
+            WUNDER_DEVTOOLS_NETWORK=bridge bash scripts/wunder-devtools-ee.sh bash -c '
+              set -euo pipefail
+              test -z "${GH_TOKEN:-}" && test -z "${GITHUB_TOKEN:-}"
+              export GITHUB_REPOSITORY="$1" REPOSITORY_ID="$2" RELEASE_SHA="$3" CANDIDATE_NAME="$4"
+              export NORMAL_TWO_STAGE=true SECURITY_RELEASE=false
+              verify_root=/workspace/.normal-release-readback
+              install_root="$HOME/release-install"
+              source /workspace/.normal-readback-validation.sh
+            ' verify-release-readback "$GITHUB_REPOSITORY" "$REPOSITORY_ID" "$RELEASE_SHA" "$CANDIDATE_NAME"
+          else
+            # Literal verifier written immediately above.
+            # shellcheck disable=SC1090
+            source "$operation"
+          fi
+          else
+            # Preserved legacy and Security publication implementation.
           set -euo pipefail
 
           verify_root="$RUNNER_TEMP/github-release-verification"
@@ -2142,12 +2831,35 @@ jobs:
           test -s "$installed_playbook"
           ANSIBLE_COLLECTIONS_PATH="$install_root" \
             ansible-playbook --syntax-check "$installed_playbook"
-
+          fi
       - name: Verify Galaxy version install and smoke
         if: >-
           (env.SECURITY_RELEASE != 'true' || env.GALAXY_REQUIRED != 'true') &&
           (env.GALAXY_REQUIRED == 'true')
         run: |
+          set -euo pipefail
+          if [ "${NORMAL_TWO_STAGE:-false}" = true ]; then
+            # Normal release EE transport; no credentials enter the validator.
+          WUNDER_DEVTOOLS_NETWORK=bridge bash scripts/wunder-devtools-ee.sh bash -c '
+            set -euo pipefail
+            test -z "${GH_TOKEN:-}" && test -z "${GITHUB_TOKEN:-}"
+          set -euo pipefail
+
+          install_root="$HOME/galaxy-release-install"
+          ansible-galaxy collection install \
+            "lit.supplementary:==$2" \
+            -p "$install_root" \
+            --force
+          ANSIBLE_COLLECTIONS_PATH="$install_root" \
+            ansible-doc --type role lit.supplementary.keycloak_deploy >/dev/null
+          installed_playbook="$install_root/ansible_collections/lit/supplementary/playbooks/example.yml"
+          test -s "$installed_playbook"
+          ANSIBLE_COLLECTIONS_PATH="$install_root" \
+            ansible-playbook --syntax-check "$installed_playbook"
+
+          ' collection-install "$CANDIDATE_NAME" "$RELEASE_VERSION"
+          else
+            # Preserved legacy and Security publication implementation.
           set -euo pipefail
 
           install_root="$RUNNER_TEMP/galaxy-release-install"
@@ -2161,7 +2873,7 @@ jobs:
           test -s "$installed_playbook"
           ANSIBLE_COLLECTIONS_PATH="$install_root" \
             ansible-playbook --syntax-check "$installed_playbook"
-
+          fi
       - name: Prepare completed normal publication evidence
         if: env.NORMAL_TWO_STAGE == 'true'
         id: normal-completion
@@ -2171,11 +2883,41 @@ jobs:
         run: |
           set -euo pipefail
           test "$SECURITY_RELEASE" = false
-          reused="$(python scripts/normal_release_archive.py --operation completion-prepare \
-            --directory dist/release --output "$RUNNER_TEMP/normal-completion" \
-            --repository "$GITHUB_REPOSITORY" --repository-id "$REPOSITORY_ID" --release "$RELEASE_SHA" \
-            --version "$RELEASE_VERSION" --galaxy-required "$GALAXY_REQUIRED")"
-          echo "reused=$reused" >>"$GITHUB_OUTPUT"
+          observations="$GITHUB_WORKSPACE/.normal-completion-observations"
+          fresh="$GITHUB_WORKSPACE/.normal-completion-fresh"
+          bash scripts/normal_release_observations.sh completion \
+            "$observations" "$GITHUB_REPOSITORY" "$RELEASE_SHA"
+          mkdir "$RUNNER_TEMP/normal-completion-ee"
+          release_path="repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}"
+          release_file="$(jq -er --arg path "$release_path" '.calls[$path]' "$observations/index.json")"
+          verifier_network=none
+          if jq -e '.assets | any(.name == "post-release-verification.json")' \
+              "$observations/$release_file" >/dev/null; then
+            verifier_network=bridge
+          fi
+          WUNDER_DEVTOOLS_NETWORK="$verifier_network" bash scripts/wunder-devtools-ee.sh bash -c '
+            set -euo pipefail
+            mkdir "$HOME/output"
+            test -z "${GH_TOKEN:-}" && test -z "${GITHUB_TOKEN:-}"
+            python3 -B scripts/normal_release_archive.py --operation completion-prepare \
+              --directory /workspace/dist/release --output "$HOME/output/normal-completion" \
+              --repository "$1" --repository-id "$2" --release "$3" --version "$4" --galaxy-required "$5" \
+              --observation-directory /workspace/.normal-completion-observations >"$HOME/output/reused"
+            tar -C "$HOME/output" -cf - normal-completion reused
+          ' normal-completion "$GITHUB_REPOSITORY" "$REPOSITORY_ID" "$RELEASE_SHA" \
+            "$RELEASE_VERSION" "$GALAXY_REQUIRED" | tar -xf - -C "$RUNNER_TEMP/normal-completion-ee"
+          bash scripts/normal_release_observations.sh fresh \
+            "$fresh" "$GITHUB_REPOSITORY" "$RELEASE_SHA" "$observations"
+          bash scripts/wunder-devtools-ee.sh bash -c '
+            set -euo pipefail
+            cp -a --no-preserve=ownership /workspace/release-control-source "$HOME/control"
+            python3 -B scripts/normal_release_proof.py freshness \
+              --root /workspace --base "$1" --control-root "$HOME/control" --repository "$2" --repository-id "$3" \
+              --observation-directory /workspace/.normal-completion-observations \
+              --fresh-observation-directory /workspace/.normal-completion-fresh
+          ' normal-completion-freshness "$RELEASE_SHA" "$GITHUB_REPOSITORY" "$REPOSITORY_ID"
+          mv "$RUNNER_TEMP/normal-completion-ee/normal-completion" "$RUNNER_TEMP/normal-completion"
+          echo "reused=$(cat "$RUNNER_TEMP/normal-completion-ee/reused")" >>"$GITHUB_OUTPUT"
 
       - name: Attest completed normal publication
         if: env.NORMAL_TWO_STAGE == 'true' && steps.normal-completion.outputs.reused != 'true'
@@ -2199,17 +2941,47 @@ jobs:
             test -s "$COMPLETION_BUNDLE"
             cp "$COMPLETION_BUNDLE" "$bundle"
             identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/collection-publish.yml@refs/heads/main"
-            gh attestation verify "$receipt" --bundle "$bundle" --repo "$GITHUB_REPOSITORY" \
-              --cert-identity "$identity" --source-ref refs/heads/main --source-digest "$RELEASE_SHA"
+            mkdir "$GITHUB_WORKSPACE/.normal-completion-local"
+            cp "$receipt" "$bundle" "$GITHUB_WORKSPACE/.normal-completion-local/"
+            WUNDER_DEVTOOLS_NETWORK=bridge bash scripts/wunder-devtools-ee.sh gh attestation verify \
+              .normal-completion-local/post-release-verification.json \
+              --bundle .normal-completion-local/post-release-verification.json.sigstore.json \
+              --repo "$GITHUB_REPOSITORY" --cert-identity "$identity" \
+              --source-ref refs/heads/main --source-digest "$RELEASE_SHA"
             # No clobber or retry: a partial/unknown upload requires actual readback.
             gh release upload "$RELEASE_TAG" "$receipt" "$bundle" --repo "$GITHUB_REPOSITORY"
           fi
-          python scripts/normal_release_archive.py --operation completion-verify \
-            --directory "$RUNNER_TEMP/normal-completion-readback" \
-            --repository "$GITHUB_REPOSITORY" --repository-id "$REPOSITORY_ID" --release "$RELEASE_SHA" \
-            --version "$RELEASE_VERSION" --galaxy-required "$GALAXY_REQUIRED"
-          cmp "$receipt" "$RUNNER_TEMP/normal-completion-readback/post-release-verification.json"
-          cmp "$bundle" "$RUNNER_TEMP/normal-completion-readback/post-release-verification.json.sigstore.json"
+          if [ "$COMPLETION_REUSED" = true ]; then
+            mkdir "$GITHUB_WORKSPACE/.normal-completion-local"
+            cp "$receipt" "$bundle" "$GITHUB_WORKSPACE/.normal-completion-local/"
+          fi
+          observations="$GITHUB_WORKSPACE/.normal-completion-readback-observations"
+          fresh="$GITHUB_WORKSPACE/.normal-completion-readback-fresh"
+          bash scripts/normal_release_observations.sh completion \
+            "$observations" "$GITHUB_REPOSITORY" "$RELEASE_SHA"
+          WUNDER_DEVTOOLS_NETWORK=bridge bash scripts/wunder-devtools-ee.sh bash -c '
+            set -euo pipefail
+            test -z "${GH_TOKEN:-}" && test -z "${GITHUB_TOKEN:-}"
+            python3 -B scripts/normal_release_archive.py --operation completion-verify \
+              --directory "$HOME/normal-completion-readback" \
+              --repository "$1" --repository-id "$2" --release "$3" --version "$4" --galaxy-required "$5" \
+              --observation-directory /workspace/.normal-completion-readback-observations
+            cmp .normal-completion-local/post-release-verification.json \
+              "$HOME/normal-completion-readback/post-release-verification.json"
+            cmp .normal-completion-local/post-release-verification.json.sigstore.json \
+              "$HOME/normal-completion-readback/post-release-verification.json.sigstore.json"
+          ' normal-completion-readback "$GITHUB_REPOSITORY" "$REPOSITORY_ID" "$RELEASE_SHA" \
+            "$RELEASE_VERSION" "$GALAXY_REQUIRED"
+          bash scripts/normal_release_observations.sh fresh \
+            "$fresh" "$GITHUB_REPOSITORY" "$RELEASE_SHA" "$observations"
+          bash scripts/wunder-devtools-ee.sh bash -c '
+            set -euo pipefail
+            cp -a --no-preserve=ownership /workspace/release-control-source "$HOME/control"
+            python3 -B scripts/normal_release_proof.py freshness \
+              --root /workspace --base "$1" --control-root "$HOME/control" --repository "$2" --repository-id "$3" \
+              --observation-directory /workspace/.normal-completion-readback-observations \
+              --fresh-observation-directory /workspace/.normal-completion-readback-fresh
+          ' normal-completion-final-freshness "$RELEASE_SHA" "$GITHUB_REPOSITORY" "$REPOSITORY_ID"
 
       - name: Mint exact back-sync dispatch App token
         if: >-

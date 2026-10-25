@@ -52,12 +52,16 @@
     {
       "path": "AGENTS.md",
       "previous_sha256": "f43707e345a3cd7bbc31f21f744c167e1ec4a75fb046a45e45bb364ae41b9378",
-      "sha256": "9522923e3aa9838092b68f8f37e3a62897788daf07b2b7a16ae8c83fb7d6e696"
+      "sha256": "c03fe9513ec6c9358b68f83de8138a2da2f976922da14a7ad28b29178a9e54ec",
+      "superseded_sha256": "9522923e3aa9838092b68f8f37e3a62897788daf07b2b7a16ae8c83fb7d6e696",
+      "update_reason": "LTN-360: document the existing normal Develop-to-Main release route and the explicit dormant retirement; retain Security, review, protection and historical source boundaries."
     },
     {
       "path": ".github/copilot-instructions.md",
       "previous_sha256": "7c2310c57395ab32eba2c34bd40bce67c7a06eff1a94ceca3109f1165b4cb270",
-      "sha256": "4b098925cac2ca9387e0379a9701e0b97282c22bd14ea1d8eef9e69fd86dad56"
+      "sha256": "550f3d077ce6b4a4195a5ba66b2b5c5ffc26c961be6fa2ff9d85c14ff5f8cda4",
+      "superseded_sha256": "4b098925cac2ca9387e0379a9701e0b97282c22bd14ea1d8eef9e69fd86dad56",
+      "update_reason": "LTN-360: document the existing normal Develop-to-Main release route and the explicit dormant retirement; retain Security, review, protection and historical source boundaries."
     },
     {
       "path": ".github/workflows/current-revision-rerun.yml",

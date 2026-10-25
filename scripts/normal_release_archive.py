@@ -19,7 +19,7 @@ import selectors
 import shutil
 import subprocess
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 SNAPSHOT = "normal-release-native-evidence.json"
@@ -33,6 +33,7 @@ MAX_COMPLETION_BYTES = 1024 * 1024
 MAX_ASSET_BYTES = 2_000_000_000
 MAX_READS = 4096
 WORKFLOW = ".github/workflows/collection-publish.yml"
+_OBSERVATIONS = None
 
 
 def require(value, message):
@@ -359,6 +360,9 @@ def verify_files(snapshot, bundle, repository, repository_id, release):
 
 def download_assets(published, repository, directory, limits):
     """Download only caller-bound names and sizes from actual positive asset IDs."""
+    if _OBSERVATIONS is not None:
+        _OBSERVATIONS.assets(published, repository, directory, limits)
+        return
     require(
         type(published.get("assets")) is list and all(type(asset) is dict for asset in published["assets"]),
         "archive-release-assets-missing",
@@ -691,6 +695,8 @@ def verify_completion(published, context, directory):
 
 
 def read_release(context):
+    if _OBSERVATIONS is not None:
+        return _OBSERVATIONS.release(context)
     executable = shutil.which("gh")
     require(executable, "archive-downloader-unavailable")
     result = subprocess.run(  # noqa: S603, RUF100 -- fixed read-only GitHub endpoint; portable across target Ruff profiles.
@@ -701,6 +707,112 @@ def read_release(context):
     )
     require(len(result.stdout) <= MAX_COMPLETION_BYTES, "completion-release-response-size")
     return json.loads(result.stdout, object_pairs_hook=unique)
+
+
+@contextmanager
+def observation_reads(directory, repository):
+    """Read fixed native Release/asset responses offline, with no transport fallback.
+
+    These bytes are untrusted observations. All existing release identity,
+    manifest, replay and cryptographic checks still run in their original order.
+    """
+    global _OBSERVATIONS  # pylint: disable=global-statement
+    require(repository == "lightning-it/ansible-collection-supplementary", "observation-repository")
+    index = json.loads(bounded_file(directory / "index.json", MAX_COMPLETION_BYTES), object_pairs_hook=unique)
+    require(
+        type(index) is dict
+        and set(index) == {"version", "repository", "calls", "logs", "artifacts", "assets"}
+        and type(index["version"]) is int
+        and index["version"] == 1
+        and index["repository"] == repository,
+        "observation-index-binding",
+    )
+    names = set()
+    for kind, pattern in (
+        ("calls", r"read-[0-9]+\.json"),
+        ("logs", r"log-[0-9]+\.txt"),
+        ("artifacts", r"artifact-[0-9]+\.zip"),
+        ("assets", r"asset-[0-9]+\.bin"),
+    ):
+        require(type(index[kind]) is dict, "observation-index-shape")
+        for key, name in index[kind].items():
+            require(
+                type(name) is str and re.fullmatch(pattern, name) and name not in names, "observation-file-identity"
+            )
+            require(
+                type(key) is str
+                and (
+                    (key == f"repos/{repository}" or key.startswith(f"repos/{repository}/"))
+                    if kind == "calls"
+                    else re.fullmatch(r"[1-9][0-9]*", key)
+                ),
+                "observation-read-scope",
+            )
+            names.add(name)
+    require(
+        0 < len(names) <= MAX_READS
+        and {p.name for p in directory.iterdir()} == names | {"index.json"}
+        and all((directory / name).is_file() and not (directory / name).is_symlink() for name in names),
+        "observation-file-inventory",
+    )
+    require(
+        sum((directory / name).stat().st_size for name in names if name.startswith("asset-")) <= 16_000_000_000,
+        "observation-asset-aggregate",
+    )
+    require(
+        sum((directory / name).stat().st_size for name in names if not name.startswith("asset-")) <= 128 * 1024 * 1024,
+        "observation-read-aggregate",
+    )
+
+    class Reads:
+        def release(self, context):
+            require(context["repository"] == repository, "observation-release-repository")
+            path = f"repos/{repository}/releases/tags/{context['tag']}"
+            require(path in index["calls"], "observation-release-missing")
+            return json.loads(
+                bounded_file(directory / index["calls"][path], MAX_COMPLETION_BYTES), object_pairs_hook=unique
+            )
+
+        def assets(self, published, repo, output, limits):
+            require(repo == repository and type(published.get("assets")) is list, "observation-asset-repository")
+            selected = []
+            for name, maximum in limits:
+                matches = [asset for asset in published["assets"] if asset.get("name") == name]
+                require(len(matches) == 1, "archive-release-asset-missing-or-ambiguous")
+                asset = matches[0]
+                require(
+                    type(asset.get("id")) is int
+                    and asset["id"] > 0
+                    and asset.get("state") == "uploaded"
+                    and type(asset.get("size")) is int
+                    and 0 < asset["size"] <= maximum,
+                    "archive-release-asset-bound",
+                )
+                require(str(asset["id"]) in index["assets"], "observation-asset-missing")
+                selected.append(asset["id"])
+                path = directory / index["assets"][str(asset["id"])]
+                require(path.stat().st_size == asset["size"] <= maximum, "archive-release-download")
+                digest = hashlib.sha256()
+                with (
+                    path.open("rb") as stream,
+                    (output / name).open("wb") if output is not None else nullcontext() as target,
+                ):
+                    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                        digest.update(chunk)
+                        if target is not None:
+                            target.write(chunk)
+                if asset.get("digest") is not None:
+                    require(asset["digest"] == "sha256:" + digest.hexdigest(), "observation-asset-digest")
+                if output is None:
+                    require(asset.get("expected_sha256") == digest.hexdigest(), "completion-asset-bytes")
+            require(len(set(selected)) == len(selected), "archive-release-asset-identity")
+
+    previous = _OBSERVATIONS
+    _OBSERVATIONS = Reads()
+    try:
+        yield
+    finally:
+        _OBSERVATIONS = previous
 
 
 def completion_prepare(directory, output, context):
@@ -738,24 +850,33 @@ def main():
     parser.add_argument("--repository", required=True)
     parser.add_argument("--repository-id", required=True)
     parser.add_argument("--release", required=True)
+    parser.add_argument("--observation-directory", type=Path)
     args = parser.parse_args()
     try:
-        if args.operation == "archive":
-            require(args.snapshot is not None and args.bundle is not None, "archive-files-required")
-            verify_files(args.snapshot, args.bundle, args.repository, args.repository_id, args.release)
-        else:
-            require(args.directory is not None and args.galaxy_required is not None, "completion-arguments")
-            context = completion_context(
-                args.repository, args.repository_id, args.release, args.version, args.galaxy_required == "true"
-            )
-            if args.operation == "completion-prepare":
-                require(args.output is not None, "completion-output-required")
-                print("true" if completion_prepare(args.directory, args.output, context) else "false")
+        context = (
+            observation_reads(args.observation_directory, args.repository)
+            if args.observation_directory is not None
+            else nullcontext()
+        )
+        with context:
+            if args.operation == "archive":
+                require(args.snapshot is not None and args.bundle is not None, "archive-files-required")
+                verify_files(args.snapshot, args.bundle, args.repository, args.repository_id, args.release)
             else:
-                published = read_release(context)
-                args.directory.mkdir(parents=True, exist_ok=False)
-                verify_completion(published, context, args.directory)
-                require(release_state(read_release(context)) == release_state(published), "completion-release-drift")
+                require(args.directory is not None and args.galaxy_required is not None, "completion-arguments")
+                context = completion_context(
+                    args.repository, args.repository_id, args.release, args.version, args.galaxy_required == "true"
+                )
+                if args.operation == "completion-prepare":
+                    require(args.output is not None, "completion-output-required")
+                    print("true" if completion_prepare(args.directory, args.output, context) else "false")
+                else:
+                    published = read_release(context)
+                    args.directory.mkdir(parents=True, exist_ok=False)
+                    verify_completion(published, context, args.directory)
+                    require(
+                        release_state(read_release(context)) == release_state(published), "completion-release-drift"
+                    )
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         parser.error(str(error))
 

@@ -29,7 +29,7 @@ class SourceDependencyTests(unittest.TestCase):
 
     def test_repository_inventory_is_complete(self) -> None:
         result = DEPENDENCIES.validate_source_dependencies(root=ROOT)
-        self.assertEqual(result["container_count"], 30)
+        self.assertEqual(result["container_count"], 31)
         self.assertEqual(result["derived_container_count"], 1)
         self.assertEqual(result["collection_count"], 14)
         self.assertEqual(result["external_product_count"], 1)
@@ -42,7 +42,7 @@ class SourceDependencyTests(unittest.TestCase):
             binary.parent.mkdir(parents=True, exist_ok=True)
             binary.write_bytes(bytes(range(256)))
             result = DEPENDENCIES.validate_source_dependencies(root=root)
-            self.assertEqual(result["container_count"], 30)
+            self.assertEqual(result["container_count"], 31)
 
     def test_renovate_updates_image_copies_but_excludes_entitlement_overlay(self) -> None:
         config = json.loads((ROOT / "renovate.json").read_text(encoding="utf-8"))

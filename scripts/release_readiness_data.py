@@ -17,7 +17,7 @@ def git(*arguments):
     if executable is None:
         raise ValueError("Git executable unavailable")
     with subprocess.Popen(  # noqa: S603 -- fixed Git operations, validated immutable object IDs.
-        [executable, *arguments],
+        [executable, "-c", "safe.directory=/workspace", *arguments],
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
     ) as process:

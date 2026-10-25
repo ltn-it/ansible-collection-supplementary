@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IMAGE="quay.io/l-it/ee-wunder-devtools-ubi9:v1.16.1@sha256:c5e8707e825fcddb3e7bbc7592ebdc99a02e6ba9fa2cad71b88bcd5c71bd4d08"
+IMAGE="quay.io/l-it/ee-wunder-devtools-ubi9:v1.18.2@sha256:58955457d3410706520f34fa7ea9823d5650aa4844c562cd5c0107024d825711"
 CONTAINER_HOME="${CONTAINER_HOME:-/tmp/wunder}"
 WORKSPACE_MODE="${WUNDER_DEVTOOLS_WORKSPACE_MODE:-ro}"
 ROOTFS_MODE="${WUNDER_DEVTOOLS_ROOTFS_MODE:-ro}"

@@ -32,6 +32,23 @@ class NormalBackSyncTests(unittest.TestCase):
         self.fixture.git_env["BASH_ENV"] = os.devnull
         self.addCleanup(self.fixture.doCleanups)
         self.root, self.git = self.fixture.root, self.fixture.git
+        FIXTURE.install_ee_dispatcher(
+            self.root,
+            r"""
+if [ "${4:-}" = normal-backsync-proof ]; then
+  exec python scripts/normal_release_proof.py baseline --root "$PWD" \
+    --control-root "$PWD/back-sync-control-source" --repository "$6" --repository-id "$7" --base "$5"
+elif [ "${4:-}" = normal-backsync-freshness ]; then
+  printf '{"fresh":true}\n'
+  exit 0
+fi
+""",
+        )
+        # Writer topology tests retain their explicit native-proof seam. Actual
+        # raw collector/ZIP/Core verification is exercised in the proof suite.
+        (self.root / "scripts/normal_release_observations.sh").write_text(
+            '#!/bin/bash\nset -euo pipefail\ntest "$3" = lightning-it/ansible-collection-supplementary\nmkdir "$2"\n'
+        )
         self.release, self.develop = self.fixture.release, self.fixture.develop
         self.tagged_release = self.release
         self.git("config", "gc.auto", "0")
@@ -160,6 +177,10 @@ else:
         self.git("push", "-q", "--force", "origin", f"refs/tags/{TAG}")
 
     def run_step(self, **overrides):
+        # A real Actions checkout cleans the prior job's untracked read-only
+        # observations. Preserve the fixture's remote PR/branch state.
+        for name in (".normal-backsync-observations", ".normal-backsync-fresh"):
+            shutil.rmtree(self.root / name, ignore_errors=True)
         workflow = yaml.safe_load((ROOT / ".github/workflows/release-back-sync.yml").read_text())
         step = next(
             s for s in workflow["jobs"]["back-sync"]["steps"] if s["name"] == "Open or update release back-sync PR"

@@ -777,21 +777,6 @@ class ExactRevisionWorkflowContractTests(unittest.TestCase):
         self.assertRegex(evidence["develop_parent_sha"], r"^[0-9a-f]{40}$")
         self.assertEqual(evidence["purpose"], "Bind the reviewed main ancestry backmerge.")
 
-    def test_release_app_is_denied_from_copilot_remediation(self) -> None:
-        workflow = (ROOT / ".github/workflows/codex-copilot-remediation.yml").read_text(encoding="utf-8")
-        dispatch = workflow.split("  continue-after-push:", 1)[1].split("  inspect:", 1)[0]
-        inspect = workflow.split("  inspect:", 1)[1].split("  remediate:", 1)[0]
-        dispatch_deny = dispatch.split("if [ \"${author}\" = 'lightning-it-release-automation[bot]' ]; then", 1)[
-            1
-        ].split("fi", 1)[0]
-        self.assertIn("exit 1", dispatch_deny)
-        self.assertIn("= 'lightning-it-release-automation[bot]'", inspect)
-        inspect_deny = inspect.split("if [ \"${author}\" = 'lightning-it-release-automation[bot]' ]; then", 1)[1].split(
-            "fi", 1
-        )[0]
-        self.assertIn("exit 0", inspect_deny)
-        self.assertNotIn("openai/codex-action@", dispatch + inspect)
-
     def test_external_contributors_are_never_auto_funded(self) -> None:
         workflow = (ROOT / ".github/workflows/copilot-review.yml").read_text(encoding="utf-8")
         request_job = workflow.split("  request-current-revision-review:", 1)[1].split(
