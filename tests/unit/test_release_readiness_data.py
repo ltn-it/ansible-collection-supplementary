@@ -121,7 +121,11 @@ class ReleaseReadinessDataTests(unittest.TestCase):
         self.assertEqual("${{ steps.tips.outputs.content_sha }}", exporter["env"]["CONTENT_SHA"])
         self.assertNotIn("PYTHONPATH", str(job))
 
-    def test_scoped_workspace_git_trust_does_not_trust_an_unrelated_repository(self):
+    @unittest.skipUnless(
+        ROOT == Path("/workspace") and (ROOT / ".git").exists(),
+        "positive ownership probe requires the actual Devtools Git mount",
+    )
+    def test_scoped_workspace_git_trust_accepts_only_the_actual_devtools_mount(self):
         executable = shutil.which("git")
         assert executable
         env = self.env | {"GIT_TEST_ASSUME_DIFFERENT_OWNER": "1"}
@@ -149,9 +153,12 @@ class ReleaseReadinessDataTests(unittest.TestCase):
         )
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertTrue((destination / "galaxy.yml").is_file())
+
+    def test_scoped_workspace_git_trust_does_not_trust_an_unrelated_repository(self):
         unrelated = self.export(self.commit())
         self.assertEqual(0, unrelated.returncode, unrelated.stderr)
         # The same helper must not admit this unrelated differing-owner fixture.
+        env = self.env | {"GIT_TEST_ASSUME_DIFFERENT_OWNER": "1"}
         denied = subprocess.run(  # noqa: S603 -- no global safe.directory exemption.
             [sys.executable, str(HELPER), "--revision", self.git("rev-parse", "HEAD"), "--destination", "forbidden"],
             cwd=self.root,

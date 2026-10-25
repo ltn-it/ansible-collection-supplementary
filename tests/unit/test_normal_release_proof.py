@@ -1382,6 +1382,26 @@ class RealNativeArchiveTests(unittest.TestCase):
                     fixture.develop,
                 )
             self.assertEqual(fixture.release, result["main_merge"])
+            # Exercise first-time archival through the actual nested recorder,
+            # not only the verifier's non-recording publish() path.
+            archive_directory = root / "first-publication-archive"
+            with PROOF.native_reads(core, collected, REPOSITORY, "1103407173") as api:
+                archived = PROOF.publication_archive(
+                    fixture.root,
+                    api,
+                    core,
+                    REPOSITORY,
+                    "1103407173",
+                    fixture.release,
+                    fixture.main_base,
+                    fixture.develop,
+                    archive_directory,
+                )
+            self.assertFalse(archived["archive_reused"])
+            snapshot = PROOF.archive.decode((archive_directory / PROOF.archive.SNAPSHOT).read_bytes())
+            artifacts = [entry for entry in snapshot["reads"] if entry["kind"] == "artifact"]
+            self.assertEqual(3, len(artifacts))
+            self.assertTrue(all(entry["value"]["metadata"]["expired"] is False for entry in artifacts))
             self.assertEqual({"fresh": True}, PROOF.native_fence(core, collected, fresh, REPOSITORY, "1103407173"))
             self.association_fence(fixture, core, collected, fresh)
             collected_index = json.loads((collected / "index.json").read_text())

@@ -806,7 +806,7 @@ jobs:
       github.ref == 'refs/heads/main' &&
       needs.quality-matrix.outputs.heavy_required == 'true'
     needs: [build-install, quality-matrix]
-    uses: lightning-it/modulix-validation/.github/workflows/collection-quality-profile.yml@154c99eb0d907b01edc10e9b39c94ef4912fd9dd
+    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile.yml@154c99eb0d907b01edc10e9b39c94ef4912fd9dd
     with:
       profile: heavy
       matrix-json: ${{ needs.quality-matrix.outputs.heavy }}
@@ -850,7 +850,7 @@ jobs:
     # group. Run acceptance only after the Heavy aggregate completes so the two
     # delegated profiles from this workflow cannot cancel each other.
     needs: [build-install, quality-matrix, heavy]
-    uses: lightning-it/modulix-validation/.github/workflows/collection-quality-profile.yml@154c99eb0d907b01edc10e9b39c94ef4912fd9dd
+    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile.yml@154c99eb0d907b01edc10e9b39c94ef4912fd9dd
     with:
       profile: application_acceptance
       matrix-json: ${{ needs.quality-matrix.outputs.acceptance }}

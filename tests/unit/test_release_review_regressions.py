@@ -252,10 +252,12 @@ if sys.argv[1]=='release':
 
     def test_symlink_write_target_fails_before_parser_or_generator(self):
         script = step("release-prepare.yml", "prepare", "Prepare release branch")["run"]
-        guard = script.split("# LI-344 regular generation inputs:start\n", 1)[1].split(
+        helper = (ROOT / "scripts/normal_release_environment.sh").read_text()
+        guard = helper.split("# LI-344 regular generation inputs:start\n", 1)[1].split(
             "# LI-344 regular generation inputs:end", 1
         )[0]
-        self.assertLess(script.index("# LI-344 regular generation inputs:end"), script.index('version_resolution="$('))
+        self.assertIn('git show "$WORKFLOW_SOURCE_SHA:scripts/normal_release_environment.sh"', script)
+        self.assertLess(script.index("# LI-360 normal EE transport:end"), script.index('version_resolution="$('))
         for name in (
             "galaxy.yml",
             "CHANGELOG.rst",
@@ -269,8 +271,12 @@ if sys.argv[1]=='release':
                 outside.write_text("trusted")
                 path = root / name
                 path.symlink_to(outside)
-                result = shell(guard, root, environment())
+                result = shell("release_data() { bash -s; }\n" + guard, root, environment())
                 self.assertNotEqual(0, result.returncode)
+                if name.endswith("change.yml"):
+                    self.assertIn("required", result.stderr)
+                else:
+                    self.assertIn("symlink", result.stderr)
                 self.assertEqual("trusted", outside.read_text())
 
 
@@ -791,7 +797,7 @@ class NormalPreparationEnvironmentTests(unittest.TestCase):
         root = Path(directory) / "repository"
         root.mkdir()
         (root / "scripts").mkdir()
-        for name in ("release-version.py", "security_release_contract.py"):
+        for name in ("release-version.py", "security_release_contract.py", "normal_release_environment.sh"):
             shutil.copyfile(ROOT / "scripts" / name, root / "scripts" / name)
         launcher = root / "scripts/wunder-devtools-ee.sh"
         launcher.write_text(
@@ -844,6 +850,7 @@ class NormalPreparationEnvironmentTests(unittest.TestCase):
         env["WORKFLOW_SOURCE_SHA"] = subprocess.check_output(git + ["rev-parse", "HEAD"], env=env, text=True).strip()  # noqa: S603
         (root / "changelogs/fragments/change.yml").write_text("bugfixes:\n  - Reviewed change.\n")
         (root / "yaml.py").write_text("raise RuntimeError('Develop shadow executed')\n")
+        (root / "scripts/normal_release_environment.sh").write_text("touch candidate-helper-executed\nexit 91\n")
         for arguments in (("add", "."), ("commit", "-qm", "Develop product")):
             subprocess.run(git + list(arguments), env=env, check=True, capture_output=True)  # noqa: S603
         env["BASE_SHA"] = subprocess.check_output(git + ["rev-parse", "HEAD"], env=env, text=True).strip()  # noqa: S603
@@ -858,7 +865,10 @@ class NormalPreparationEnvironmentTests(unittest.TestCase):
             root, env, script, transport = self.fixture(directory)
 
             def operation(name):
-                return script.split(f"<<'{name}'\n", 1)[1].split(f"\n{name}\n", 1)[0]
+                source = (
+                    (ROOT / "scripts/normal_release_environment.sh").read_text() if name == "RELEASE_INPUTS" else script
+                )
+                return source.split(f"<<'{name}'\n", 1)[1].split(f"\n{name}\n", 1)[0]
 
             actual = transport + "\nrelease_data <<'CHECK'\n" + operation("RELEASE_INPUTS") + "\nCHECK\n"
             actual += "resolution=$(release_data <<'VERSION_OP'\n" + operation("RELEASE_VERSION") + "\nVERSION_OP\n)\n"
@@ -873,6 +883,7 @@ class NormalPreparationEnvironmentTests(unittest.TestCase):
             self.assertIn("version: 1.0.1", (root / "galaxy.yml").read_text())
             self.assertFalse((root / "changelogs/fragments/change.yml").exists())
             self.assertTrue((root / "lit-supplementary-1.0.1.tar.gz").is_file())
+            self.assertFalse((root / "candidate-helper-executed").exists())
             self.assertIn("Develop shadow executed", (root / "yaml.py").read_text())
             context = Path(env["RUNNER_TEMP"]) / "normal-release-ee/context.sh"
             self.assertNotIn(env["GH_TOKEN"], context.read_text())

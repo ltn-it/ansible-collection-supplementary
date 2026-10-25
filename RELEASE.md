@@ -225,3 +225,10 @@ receipt under the same prefix. Bucket versioning, retention, and Object Lock/WOR
 are storage-side controls. Whether archival is mandatory comes only from the reviewed
 `.lit/repository.yml:enterprise_role_quality.long_term_archive_required` policy;
 it is not a mutable workflow-dispatch input or repository variable.
+
+The release-preparation data transport lives in
+`scripts/normal_release_environment.sh` so the workflow's shell step stays below
+GitHub's 21,000-character limit. The workflow loads this helper from the exact
+protected Main Git object before executing it; a candidate checkout cannot supply
+the helper. Its private Devtools context still excludes App and GitHub credentials.
+Delivering this helper to Develop does not grant Main or release acceptance.

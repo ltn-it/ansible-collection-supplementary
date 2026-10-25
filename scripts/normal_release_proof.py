@@ -635,7 +635,7 @@ def native_snapshot(core, directory, repository, repository_id):
         def artifact(self, _original, _api, repo, run, name, filename):
             require(repo == repository, "normal-artifact-repository")
             archive.artifact_identity(repo, run, name, filename)
-            reads = archive.ArtifactReads(self, repo, run)
+            reads = archive.ArtifactReads(_api, repo, run)
             inventory = reads.pages(reads.path, "artifacts")
             matches = [a for a in inventory if a.get("name") == name and a.get("expired") is False]
             require(len(matches) == 1, "normal-native-artifact-unique")
