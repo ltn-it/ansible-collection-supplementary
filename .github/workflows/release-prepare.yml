@@ -747,7 +747,7 @@ jobs:
               --head-ref "$RELEASE_BRANCH" >/dev/null
           else
             git -C "$normal_ee_space/data" fetch --quiet --no-tags "$GITHUB_WORKSPACE" "$pushed_sha"
-            git -C "$normal_ee_space/data" checkout --quiet --detach "$pushed_sha"
+            git -C "$normal_ee_space/data" checkout --quiet --force --detach "$pushed_sha"
             release_data <<'RELEASE_PREPARATION_PROOF'
             python "$workflow_source/scripts/normal_release_proof.py" preparation \
               --root "$GITHUB_WORKSPACE" --head "$pushed_sha" --base "$BASE_SHA" \

@@ -192,6 +192,7 @@ jobs:
           set -euo pipefail
           python -m pip install --disable-pip-version-check \
             "ansible-core==${ANSIBLE_CORE_VERSION}" \
+            antsibull-changelog==0.35.1 \
             pre-commit==4.3.0 \
             pytest==9.0.3 \
             PyYAML==6.0.3

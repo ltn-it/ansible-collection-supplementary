@@ -787,17 +787,25 @@ elif args[0]!='verify-blob': raise SystemExit('unexpected cosign operation')
 
 
 class NormalPreparationEnvironmentTests(unittest.TestCase):
-    """Actual workflow operations execute in the already-pinned test EE.
+    """Actual workflow operations use the installed release toolchain.
 
     The fixture substitutes only the outer container mount/launch, because an
     offline EE cannot and must not receive a Docker socket for nested launches.
+    Hosted unit tests install the same changelog-tool version explicitly.
     """
 
     def fixture(self, directory):
         root = Path(directory) / "repository"
         root.mkdir()
         (root / "scripts").mkdir()
-        for name in ("release-version.py", "security_release_contract.py", "normal_release_environment.sh"):
+        for name in (
+            "release-version.py",
+            "security_release_contract.py",
+            "normal_release_environment.sh",
+            "normal_release_proof.py",
+            "normal_release_archive.py",
+            "security_main_promotion.py",
+        ):
             shutil.copyfile(ROOT / "scripts" / name, root / "scripts" / name)
         launcher = root / "scripts/wunder-devtools-ee.sh"
         launcher.write_text(
@@ -899,6 +907,45 @@ class NormalPreparationEnvironmentTests(unittest.TestCase):
             self.assertNotEqual(0, result.returncode)
             self.assertFalse((root / "forbidden-acceptance").exists())
             self.assertEqual(before, (root / "galaxy.yml").read_bytes())
+
+    def test_generation_commit_to_proof_uses_clean_prepared_data_view(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, env, script, transport = self.fixture(directory)
+
+            def operation(name):
+                return script.split(f"<<'{name}'\n", 1)[1].split(f"\n{name}\n", 1)[0]
+
+            actual = transport + "\nresolution=$(release_data <<'VERSION_OP'\n"
+            actual += operation("RELEASE_VERSION") + "\nVERSION_OP\n)\n"
+            actual += 'VERSION=$(jq -er .version <<<"$resolution")\nPREPARATION_MODE=normal\n'
+            for name in ("RELEASE_GENERATE", "RELEASE_BUILD"):
+                actual += "release_data <<'NEXT_OP'\n" + operation(name) + "\nNEXT_OP\n"
+            actual += "git add galaxy.yml changelogs CHANGELOG.rst\n"
+            actual += 'GIT_AUTHOR_NAME="lightning-it-release-automation[bot]" '
+            actual += 'GIT_AUTHOR_EMAIL="307565056+lightning-it-release-automation[bot]@users.noreply.github.com" '
+            actual += 'GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME" GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL" '
+            actual += 'git commit -qm "chore(release): prepare v${VERSION}"\n'
+            actual += 'pushed_sha=$(git rev-parse HEAD)\nprintf "preserve\\n" >host-untracked-work\n'
+            start = script.index('git -C "$normal_ee_space/data" fetch')
+            end = script.index("release_data <<'RELEASE_PREPARATION_PROOF'", start)
+            actual += script[start:end]
+            actual += "release_data <<'ACTUAL_PREPARATION_PROOF'\n"
+            actual += operation("RELEASE_PREPARATION_PROOF") + "\nACTUAL_PREPARATION_PROOF\n"
+            # Also assert the proof saw the committed clean data view and did
+            # not modify host work or execute the candidate's helper/shadow.
+            actual += "release_data <<'CHECK_PREPARED_PROOF_VIEW'\n"
+            actual += 'test "$(git rev-parse HEAD)" = "$pushed_sha"\n'
+            actual += 'test -z "$(git status --porcelain)"\n'
+            actual += 'git show HEAD:changelogs/release-preparation.json >"$RUNNER_TEMP/committed-receipt.json"\n'
+            actual += 'cmp changelogs/release-preparation.json "$RUNNER_TEMP/committed-receipt.json"\n'
+            actual += 'test "$(jq -er .next_version changelogs/release-preparation.json)" = "$VERSION"\n'
+            actual += 'test -z "${GH_TOKEN:-}" && test -z "${GITHUB_TOKEN:-}"\n'
+            actual += "CHECK_PREPARED_PROOF_VIEW\n"
+            result = shell(actual, root, env)
+            self.assertEqual(0, result.returncode, result.stderr + result.stdout)
+            self.assertEqual("preserve\n", (root / "host-untracked-work").read_text())
+            self.assertFalse((root / "candidate-helper-executed").exists())
+            self.assertIn("Develop shadow executed", (root / "yaml.py").read_text())
 
     def test_explicit_normal_version_must_still_equal_reviewed_fragment_impact(self):
         with tempfile.TemporaryDirectory() as directory:
