@@ -23,6 +23,7 @@ argument_specs:
       forward_proxy_port: {type: int, default: 3128}
       forward_proxy_allowed_clients: {type: list, elements: str}
       forward_proxy_allowed_destination_domains: {type: list, elements: str}
+      forward_proxy_destination_domains_by_client: {type: dict}
       forward_proxy_allowed_destination_ports: {type: list, elements: int}
       forward_proxy_upstream_enabled: {type: bool, default: false}
       forward_proxy_upstream_host: {type: str, default: ""}

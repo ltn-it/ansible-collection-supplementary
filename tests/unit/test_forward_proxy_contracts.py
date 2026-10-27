@@ -21,6 +21,7 @@ ENABLED = ROOT / "roles" / "forward_proxy" / "tasks" / "enabled.yml"
 ENABLED_APPLY = ROOT / "roles" / "forward_proxy" / "tasks" / "enabled_apply.yml"
 READINESS = ROOT / "roles" / "forward_proxy" / "tasks" / "verify_runtime_ready.yml"
 POD_TEMPLATE = ROOT / "roles" / "forward_proxy" / "templates" / "squid-pod.yml.j2"
+SQUID_TEMPLATE = ROOT / "roles" / "forward_proxy" / "templates" / "squid.conf.j2"
 RESTORE = ROOT / "roles" / "forward_proxy" / "tasks" / "restore_managed_file.yml"
 README = ROOT / "roles" / "forward_proxy" / "README.md"
 VERIFY = ROOT / "molecule" / "forward-proxy-tiny" / "verify.yml"
@@ -30,6 +31,27 @@ RELEASE_ELIGIBILITY = ROOT / "molecule" / "forward-proxy-tiny" / "tasks" / "rele
 
 
 class ForwardProxyContractTests(unittest.TestCase):
+    def test_source_bound_domains_do_not_render_a_shared_allow_rule(self) -> None:
+        rendered = Environment(undefined=StrictUndefined).from_string(SQUID_TEMPLATE.read_text()).render(
+            forward_proxy_listen_addresses=["127.0.0.1"],
+            forward_proxy_port=3128,
+            forward_proxy_allowed_clients=["127.0.0.1/32", "10.89.10.3/32"],
+            forward_proxy_allowed_destination_ports=[80, 443],
+            forward_proxy_allowed_destination_domains=[".ubuntu.com", "lightning-it.okta.com"],
+            forward_proxy_destination_domains_by_client={
+                "127.0.0.1/32": [".ubuntu.com"],
+                "10.89.10.3/32": ["lightning-it.okta.com"],
+            },
+            forward_proxy_upstream_enabled=False,
+        )
+        self.assertIn("acl lit_client_0 src 10.89.10.3/32", rendered)
+        self.assertIn("acl lit_domains_0 dstdomain -n lightning-it.okta.com", rendered)
+        self.assertIn("acl lit_client_1 src 127.0.0.1/32", rendered)
+        self.assertIn("acl lit_domains_1 dstdomain -n .ubuntu.com", rendered)
+        self.assertIn("http_access allow lit_client_0 lit_domains_0", rendered)
+        self.assertIn("http_access allow lit_client_1 lit_domains_1", rendered)
+        self.assertNotIn("http_access allow lit_clients lit_allowed_domains", rendered)
+
     def test_runtime_liveness_probe_uses_only_pinned_image_primitives(self) -> None:
         pod_template = POD_TEMPLATE.read_text(encoding="utf-8")
 
