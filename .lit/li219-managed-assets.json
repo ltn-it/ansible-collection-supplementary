@@ -51,7 +51,7 @@
     {
       "path": "scripts/lit-push-ready.py",
       "category": "local-required",
-      "sha256": "e2ffdb26feebf9e58d9e4d4d389941cd041fe72b1e3e37fb891f2b6e0b895231",
+      "sha256": "26d28b0ed36f8aeca4fbb7c4454cdedaa5b6fc075492df09624cbae9cb335adc",
       "owner": "ansible-collection-supplementary",
       "purpose": "Protected PR base-ref dispatch/consumer binding and native sanity source compatibility; strict schema types and runtime Unicode content semantics retained."
     },

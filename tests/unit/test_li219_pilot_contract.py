@@ -1,5 +1,6 @@
 """Supplementary ownership and actual pilot caller boundaries."""
 
+import ast
 import hashlib
 import json
 import unittest
@@ -13,11 +14,16 @@ ROOT = Path(__file__).resolve().parents[2]
 def current_policy_digest(path, historical_digest):
     updates = json.loads((ROOT / ".lit/li319-central-verifier-retirement.json").read_text())["policy_updates"]
     matches = [row for row in updates if row["path"] == path]
-    if not matches:
-        return historical_digest
-    if len(matches) != 1 or matches[0]["previous_sha256"] != historical_digest:
-        raise AssertionError("Policy update must bind one exact historical predecessor")
-    return matches[0]["sha256"]
+    if matches:
+        if len(matches) != 1 or matches[0]["previous_sha256"] != historical_digest:
+            raise AssertionError("Policy update must bind one exact historical predecessor")
+        historical_digest = matches[0]["sha256"]
+    adoption = json.loads((ROOT / ".lit/ltn399-push-ready-origin-adoption.json").read_text())
+    if path == adoption["target_path"]:
+        if adoption["previous_sha256"] != historical_digest:
+            raise AssertionError("Origin adoption must bind the exact previous policy digest")
+        return adoption["sha256"]
+    return historical_digest
 
 
 ASSETS = {
@@ -43,6 +49,39 @@ RETIRED = {
 
 
 class PilotContractTests(unittest.TestCase):
+    def test_ltn399_origin_adoption_binds_protected_source_and_exact_successor(self):
+        adoption = json.loads((ROOT / ".lit/ltn399-push-ready-origin-adoption.json").read_text())
+        content = {key: value for key, value in adoption.items() if key != "receipt_sha256"}
+        receipt = hashlib.sha256(json.dumps(content, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        self.assertEqual(receipt, adoption["receipt_sha256"])
+        self.assertEqual("ltn399-push-ready-origin-adoption/v1", adoption["schema"])
+        self.assertEqual("ltn-it/ansible-collection-supplementary", adoption["repository"])
+        self.assertEqual("scripts/lit-push-ready.py", adoption["target_path"])
+        self.assertEqual("adapted-local", adoption["mode"])
+        source = adoption["source"]
+        self.assertEqual("ltn-it/shared-assets-lit", source["repository"])
+        self.assertEqual("refs/heads/develop", source["ref"])
+        self.assertEqual("9b3f2383bb02eba74c76933e49e0a0a1d3d0f32d", source["commit"])
+        self.assertEqual("eab0af3194aa8c4beb1f7af56d52c4eea11f02f7", source["tree"])
+        self.assertEqual("e19d4d62730a06e409558adb1d4ebdc62d5629ac", source["blob"])
+        self.assertEqual("11e09e294a8f82b25b0269fcece8fea90341d28ba9ae2e9ba3e6b9cc706ea077", source["sha256"])
+        self.assertEqual("governed_push_remote_from_url", source["function"])
+        self.assertEqual("1ff9ad3193621e06a4030a51094bc8d62eae13f8ea1972b585e3454ead7b94c2", source["function_sha256"])
+        target = (ROOT / adoption["target_path"]).read_text()
+        node = next(
+            node
+            for node in ast.parse(target).body
+            if isinstance(node, ast.FunctionDef) and node.name == source["function"]
+        )
+        semantic_digest = hashlib.sha256(ast.unparse(node).encode()).hexdigest()
+        self.assertEqual(source["function_semantic_sha256"], semantic_digest)
+        self.assertEqual(adoption["sha256"], hashlib.sha256(target.encode()).hexdigest())
+        historical = json.loads((ROOT / ".lit/li219-pilot-source.json").read_text())
+        previous = next(
+            row["target_sha256"] for row in historical["bindings"] if row["target_path"] == adoption["target_path"]
+        )
+        self.assertEqual(previous, adoption["previous_sha256"])
+
     def test_source_adoption_receipt_is_portable_and_content_bound_in_all_manifests(self):
         receipts = []
         for name, key in (
@@ -82,12 +121,19 @@ class PilotContractTests(unittest.TestCase):
             self.assertEqual(asset["sha256"], digest)
             if binding["target_sha256"] != digest:
                 # Keep the LI-219 protected donor receipt immutable. LI-259 is
-                # a separate, exact protected-main overlay for changed assets.
-                successor = overlay_assets[binding["target_path"]]
-                self.assertEqual(overlay["protected_source_commit"], "5b70bdaa4eaa9b0121545cb842eca8b3256e9cc3")
-                self.assertEqual(current_policy_digest(binding["target_path"], successor["sha256"]), digest)
+                # a separate, exact protected-main overlay; the later origin
+                # adoption binds the local policy without rewriting either.
+                successor = overlay_assets.get(binding["target_path"])
+                if successor is not None:
+                    self.assertEqual(overlay["protected_source_commit"], "5b70bdaa4eaa9b0121545cb842eca8b3256e9cc3")
+                    historical_digest = successor["sha256"]
+                else:
+                    historical_digest = binding["target_sha256"]
+                self.assertEqual(current_policy_digest(binding["target_path"], historical_digest), digest)
                 self.assertEqual(
-                    "central-managed" if successor["mode"] == "byte-identical" else "local-required",
+                    "central-managed"
+                    if successor is not None and successor["mode"] == "byte-identical"
+                    else "local-required",
                     asset["category"],
                 )
                 continue
