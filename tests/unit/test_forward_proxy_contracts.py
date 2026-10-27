@@ -32,7 +32,9 @@ RELEASE_ELIGIBILITY = ROOT / "molecule" / "forward-proxy-tiny" / "tasks" / "rele
 
 class ForwardProxyContractTests(unittest.TestCase):
     def test_source_bound_domains_do_not_render_a_shared_allow_rule(self) -> None:
-        rendered = Environment(undefined=StrictUndefined).from_string(SQUID_TEMPLATE.read_text()).render(
+        # This renders a Squid configuration, not HTML; match Ansible's template behavior.
+        environment = Environment(undefined=StrictUndefined, autoescape=False)  # noqa: S701
+        rendered = environment.from_string(SQUID_TEMPLATE.read_text()).render(
             forward_proxy_listen_addresses=["127.0.0.1"],
             forward_proxy_port=3128,
             forward_proxy_allowed_clients=["127.0.0.1/32", "10.89.10.3/32"],
