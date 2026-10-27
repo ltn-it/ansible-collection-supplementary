@@ -3,32 +3,114 @@ argument_specs:
   main:
     short_description: Run the standard containerized LIT Squid forward proxy.
     options:
-      forward_proxy_enabled: {type: bool, default: false}
-      forward_proxy_manage_runtime: {type: bool, default: true}
-      forward_proxy_file_owner: {type: str, default: root}
-      forward_proxy_file_group: {type: str, default: root}
-      forward_proxy_render_root: {type: path, default: /tmp}
-      forward_proxy_lock_path: {type: path, default: /run/lock/lit-supplementary-forward-proxy.lock}
-      forward_proxy_lock_timeout: {type: int, default: 30}
-      forward_proxy_experimental_runtime_acceptance: {type: bool, default: false}
-      forward_proxy_image: {type: str}
-      forward_proxy_image_pull_policy: {type: str, default: Never}
-      forward_proxy_runtime_uid: {type: int, default: 13}
-      forward_proxy_runtime_gid: {type: int, default: 13}
-      forward_proxy_unit_name: {type: str, default: lit-forward-proxy}
-      forward_proxy_systemd_scope: {type: str, default: system}
-      forward_proxy_quadlet_dir: {type: path, default: /etc/containers/systemd}
-      forward_proxy_readiness_timeout: {type: int, default: 30}
-      forward_proxy_listen_addresses: {type: list, elements: str}
-      forward_proxy_port: {type: int, default: 3128}
-      forward_proxy_allowed_clients: {type: list, elements: str}
-      forward_proxy_allowed_destination_domains: {type: list, elements: str}
-      forward_proxy_destination_domains_by_client: {type: dict}
-      forward_proxy_allowed_destination_ports: {type: list, elements: int}
-      forward_proxy_upstream_enabled: {type: bool, default: false}
-      forward_proxy_upstream_host: {type: str, default: ""}
-      forward_proxy_upstream_port: {type: int, default: 3128}
-      forward_proxy_config_path: {type: path}
-      forward_proxy_pod_manifest_path: {type: path}
-      forward_proxy_state_marker_path: {type: path}
-      forward_proxy_trusted_parent_paths: {type: list, elements: path}
+      forward_proxy_enabled:
+        type: bool
+        default: false
+        description: Whether to configure and run the forward proxy.
+      forward_proxy_manage_runtime:
+        type: bool
+        default: true
+        description: Whether this role manages the proxy runtime.
+      forward_proxy_file_owner:
+        type: str
+        default: root
+        description: Owner of the managed proxy files.
+      forward_proxy_file_group:
+        type: str
+        default: root
+        description: Group of the managed proxy files.
+      forward_proxy_render_root:
+        type: path
+        default: /tmp
+        description: Directory used for temporary rendered files.
+      forward_proxy_lock_path:
+        type: path
+        default: /run/lock/lit-supplementary-forward-proxy.lock
+        description: Host path for the transition lock.
+      forward_proxy_lock_timeout:
+        type: int
+        default: 30
+        description: Seconds to wait for the transition lock.
+      forward_proxy_experimental_runtime_acceptance:
+        type: bool
+        default: false
+        description: Explicit opt-in to the experimental runtime path.
+      forward_proxy_image:
+        type: str
+        description: Digest-pinned Squid container image.
+      forward_proxy_image_pull_policy:
+        type: str
+        default: Never
+        description: Image pull policy for the proxy runtime.
+      forward_proxy_runtime_uid:
+        type: int
+        default: 13
+        description: User ID inside the proxy container.
+      forward_proxy_runtime_gid:
+        type: int
+        default: 13
+        description: Group ID inside the proxy container.
+      forward_proxy_unit_name:
+        type: str
+        default: lit-forward-proxy
+        description: Name of the managed systemd unit.
+      forward_proxy_systemd_scope:
+        type: str
+        default: system
+        description: Systemd scope used for the managed unit.
+      forward_proxy_quadlet_dir:
+        type: path
+        default: /etc/containers/systemd
+        description: Directory containing the managed Quadlet file.
+      forward_proxy_readiness_timeout:
+        type: int
+        default: 30
+        description: Seconds allowed for the proxy readiness check.
+      forward_proxy_listen_addresses:
+        type: list
+        elements: str
+        description: Addresses on which Squid listens.
+      forward_proxy_port:
+        type: int
+        default: 3128
+        description: TCP port on which Squid listens.
+      forward_proxy_allowed_clients:
+        type: list
+        elements: str
+        description: Source CIDRs allowed to use the proxy.
+      forward_proxy_allowed_destination_domains:
+        type: list
+        elements: str
+        description: Domain allowlist available to clients.
+      forward_proxy_destination_domains_by_client:
+        type: dict
+        description: Exact source-CIDR mapping to permitted destination domains.
+      forward_proxy_allowed_destination_ports:
+        type: list
+        elements: int
+        description: Destination ports allowed through the proxy.
+      forward_proxy_upstream_enabled:
+        type: bool
+        default: false
+        description: Whether to chain requests through an upstream proxy.
+      forward_proxy_upstream_host:
+        type: str
+        default: ""
+        description: Hostname or address of the upstream proxy.
+      forward_proxy_upstream_port:
+        type: int
+        default: 3128
+        description: TCP port of the upstream proxy.
+      forward_proxy_config_path:
+        type: path
+        description: Path of the managed Squid configuration.
+      forward_proxy_pod_manifest_path:
+        type: path
+        description: Path of the managed Podman pod manifest.
+      forward_proxy_state_marker_path:
+        type: path
+        description: Path of the managed runtime state marker.
+      forward_proxy_trusted_parent_paths:
+        type: list
+        elements: path
+        description: Ordered trusted parent paths for managed files.
