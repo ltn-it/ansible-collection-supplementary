@@ -24,9 +24,9 @@
       auth/{{ vault_config_approle_backend[0].path | regex_replace('^/+|/+$', '')
       }}/role/{{ vault_config_approle.role_name | urlencode }}
     vault_config_approle_kv_mount: >-
-      {{ vault_config_approle.kv_mount | default(vault_config_engine_mount_point, true) }}
+      {{ vault_config_approle.kv_mount | default(vault_config_engine_mount_point, true) | urlencode }}
     vault_config_approle_kv_path: >-
-      {{ vault_config_approle.credential_path | default(inventory_hostname ~ '/vault/approle', true) }}
+      {{ vault_config_approle.credential_path | default(inventory_hostname ~ '/vault/approle', true) | urlencode }}
   module_defaults:
     ansible.builtin.uri:
       url: "{{ vault_config_api_url | regex_replace('/+$', '') }}/v1/{{ vault_config_approle_api_path }}/role-id"
@@ -51,7 +51,7 @@
             ansible_hashi_vault_mount_point | default('approle', true) }}/login
         method: POST
         headers:
-          X-Vault-Namespace: "{{ vault_config_approle.namespace | default('') }}"
+          X-Vault-Namespace: "{{ vault_config_auth_namespace | default(ansible_hashi_vault_namespace | default('')) }}"
         body_format: json
         body:
           role_id: "{{ ansible_hashi_vault_role_id }}"
@@ -111,6 +111,31 @@
             (vault_config_approle_lookup.json.errors | default([]) | join(' ') | lower)
         fail_msg: AppRole lookup returned an unexpected error; credentials were not rotated.
 
+    - name: Require expiration metadata from a successful Secret ID lookup
+      ansible.builtin.assert:
+        that:
+          - vault_config_approle_lookup.json.data.expiration_time is string
+          - vault_config_approle_lookup.json.data.expiration_time | length > 0
+        fail_msg: Secret ID lookup omitted expiration metadata; credentials were not rotated.
+      when: vault_config_approle_lookup.status | default(0) == 200
+
+    - name: Evaluate stored Secret ID expiration without consuming a use
+      ansible.builtin.set_fact:
+        vault_config_approle_secret_expired: >-
+          {{ vault_config_approle_lookup.status | default(0) == 200
+             and (vault_config_approle_expiration
+                  | regex_search('^0001-01-01T00:00:00(?:[.]0+)?(?:Z|[+]00:00)$')) is none
+             and (vault_config_approle_expiration | regex_replace('(?<=[.][0-9]{6})[0-9]+', '')
+                  | to_datetime(vault_config_approle_expiration_format))
+                 <= (now(utc=true, fmt='%Y-%m-%dT%H:%M:%S.%f+0000')
+                     | to_datetime('%Y-%m-%dT%H:%M:%S.%f%z')) }}
+      vars:
+        vault_config_approle_expiration: >-
+          {{ vault_config_approle_lookup.json.data.expiration_time | default('') }}
+        vault_config_approle_expiration_format: >-
+          {{ '%Y-%m-%dT%H:%M:%S.%f%z' if '.' in vault_config_approle_expiration else '%Y-%m-%dT%H:%M:%S%z' }}
+      changed_when: false
+
     - name: Create AppRole secret ID only when missing or expired
       ansible.builtin.uri:
         url: "{{ vault_config_api_url | regex_replace('/+$', '') }}/v1/{{ vault_config_approle_api_path }}/secret-id"
@@ -124,6 +149,7 @@
         vault_config_approle_existing.status == 404
         or vault_config_approle_existing.json.data.data.secret_id | default('', true) | length == 0
         or vault_config_approle_lookup.status | default(200) in [400, 404]
+        or vault_config_approle_secret_expired | bool
 
     - name: Store AppRole credentials with concurrent update protection
       ansible.builtin.uri:
@@ -135,7 +161,7 @@
         body: >-
           {{ {'options': {'cas':
                 (vault_config_approle_existing.json.data.metadata | default({})).version | default(0) | int},
-              'data': (vault_config_approle_existing.json.data.data | default({}))
+              'data': (vault_config_approle_existing.json.data.data | default({}, true))
                 | combine({'role_id': vault_config_approle_role_id.json.data.role_id,
                            'secret_id': vault_config_approle_generated.json.data.secret_id
                              if vault_config_approle_generated is changed

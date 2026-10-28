@@ -93,3 +93,12 @@ without destroying the stored entry before enabling this path. A Terraform
 resource that continues to read or write that KV entry can overwrite the Secret
 ID and capture it during state refresh. Historic state backups containing old
 credentials require separate operator-controlled retirement and rotation.
+
+The controller login uses `vault_config_auth_namespace`, defaulting to
+`ansible_hashi_vault_namespace` or `VAULT_NAMESPACE`. It is independent of each
+managed entry's namespace, allowing a root or parent controller to manage child
+namespaces. KV paths are URL-encoded while retaining their path separators.
+Successful Secret-ID lookups also check expiration timestamps; Vault's year-one
+zero timestamp means no expiration. Missing or malformed expiration metadata
+stops reconciliation. A soft-deleted KV entry keeps its returned version for CAS
+while its null secret data is treated as an empty mapping.
