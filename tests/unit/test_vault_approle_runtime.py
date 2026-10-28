@@ -35,6 +35,7 @@ class AppRoleRuntimeTests(unittest.TestCase):
         soft_deleted=False,
         backend=...,
     ):
+        expected_namespace = "" if target_namespace is None or target_namespace is ... else target_namespace
         backend_mount = "alternate-mount" if backend == "secondary" else "custom-mount"
         role_url_path = f"/v1/auth/{backend_mount}/role/test-role"
         kv_url_path = "/v1/kv/data/" + quote(credential_path, safe="/")
@@ -61,7 +62,7 @@ class AppRoleRuntimeTests(unittest.TestCase):
                 expected = "scoped-fixture" if use_approle else "fixture-token"
                 if (
                     self.headers.get("X-Vault-Token") != expected
-                    or self.headers.get("X-Vault-Namespace", "") != target_namespace
+                    or self.headers.get("X-Vault-Namespace", "") != expected_namespace
                 ):
                     self.reply(403, {"errors": ["wrong auth token"]})
                     return False
@@ -155,7 +156,7 @@ class AppRoleRuntimeTests(unittest.TestCase):
                                     "vault_config_approle": {
                                         "role_name": "test-role",
                                         "credential_path": credential_path,
-                                        "namespace": target_namespace,
+                                        **({"namespace": target_namespace} if target_namespace is not ... else {}),
                                         **({"backend": backend} if backend is not ... else {}),
                                     },
                                 },
@@ -178,7 +179,11 @@ class AppRoleRuntimeTests(unittest.TestCase):
                     capture_output=True,
                     text=True,
                     timeout=90,
-                    env={**os.environ, "ANSIBLE_LOCAL_TEMP": str(Path(directory) / "ansible-tmp")},
+                    env={
+                        **os.environ,
+                        "ANSIBLE_LOCAL_TEMP": str(Path(directory) / "ansible-tmp"),
+                        "ANSIBLE_JINJA2_NATIVE": "true",
+                    },
                 )
                 self.assertNotIn("new-secret-id", result.stdout)
                 self.assertNotIn("fixture-token", result.stdout)
@@ -230,6 +235,16 @@ class AppRoleRuntimeTests(unittest.TestCase):
         result, state = self.run_role(credential_path="team/ci#production?x=1%raw space", repeat=2)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((state["generated"], state["writes"]), (1, 1))
+
+    def test_null_target_namespace_uses_root_with_native_templating(self):
+        result, state = self.run_role(target_namespace=None, use_approle=True, repeat=2)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((state["generated"], state["writes"], state["lookups"]), (1, 1, 1))
+
+    def test_omitted_target_namespace_uses_root_with_native_templating(self):
+        result, state = self.run_role(target_namespace=..., use_approle=True, repeat=2)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((state["generated"], state["writes"], state["lookups"]), (1, 1, 1))
 
     def test_root_controller_can_manage_child_namespace(self):
         result, state = self.run_role(use_approle=True, target_namespace="child")

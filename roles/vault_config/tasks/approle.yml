@@ -37,7 +37,7 @@
       url: "{{ vault_config_api_url | regex_replace('/+$', '') }}/v1/{{ vault_config_approle_api_path }}/role-id"
       headers:
         X-Vault-Token: "{{ vault_config_approle_api_token | default(vault_config_token) }}"
-        X-Vault-Namespace: "{{ vault_config_approle.namespace | default('') }}"
+        X-Vault-Namespace: "{{ vault_config_approle.namespace | default('', true) }}"
       validate_certs: "{{ vault_config_vault_validate_certs }}"
       ca_path: "{{ vault_config_api_ca_cert_path_effective | default(omit, true) }}"
       return_content: true
