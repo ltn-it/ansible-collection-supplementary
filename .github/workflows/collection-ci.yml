@@ -400,7 +400,13 @@ jobs:
             "$GITHUB_WORKSPACE/" "$collection_root/"
           cd "$collection_root"
           ansible-test sanity --requirements --python "$PYTHON_VERSION"
+      - name: Install Vault task integration test collection
+        run: >-
+          ansible-galaxy collection install community.hashi_vault:7.1.0
+          --no-deps --collections-path "$RUNNER_TEMP/policy-collections"
       - name: Run policy and evidence unit tests
+        env:
+          ANSIBLE_COLLECTIONS_PATH: ${{ runner.temp }}/policy-collections
         run: python -m pytest -q tests/test_role_coverage.py tests/unit
       - name: Compile workflow-facing Python tools
         run: |
