@@ -34,12 +34,15 @@ class AppRoleRuntimeTests(unittest.TestCase):
         expiration="0001-01-01T00:00:00Z",
         soft_deleted=False,
         backend=...,
+        config_tags=None,
+        skip_tags=None,
     ):
-        expected_namespace = "" if target_namespace is None or target_namespace is ... else target_namespace
+        expected_namespace = target_namespace if isinstance(target_namespace, str) else ""
         backend_mount = "alternate-mount" if backend == "secondary" else "custom-mount"
         role_url_path = f"/v1/auth/{backend_mount}/role/test-role"
         kv_url_path = "/v1/kv/data/" + quote(credential_path, safe="/")
         state: dict[str, Any] = {
+            "calls": 0,
             "stored": existing,
             "version": 7,
             "generated": 0,
@@ -69,6 +72,7 @@ class AppRoleRuntimeTests(unittest.TestCase):
                 return True
 
             def do_GET(self):  # noqa: N802
+                state["calls"] += 1
                 if not self.authorized():
                     return
                 if self.path == role_url_path + "/role-id":
@@ -89,6 +93,7 @@ class AppRoleRuntimeTests(unittest.TestCase):
                     self.reply(500, {"errors": ["unexpected path"]})
 
             def do_POST(self):  # noqa: N802
+                state["calls"] += 1
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 if self.path == "/v1/auth/controller/login":
                     if self.headers.get("X-Vault-Namespace", "") != controller_namespace:
@@ -140,6 +145,17 @@ class AppRoleRuntimeTests(unittest.TestCase):
                                 "hosts": "localhost",
                                 "gather_facts": False,
                                 "vars": {
+                                    "vault_config_manage_approle_credentials": True,
+                                    "vault_config_tfstate_backend": "s3",
+                                    "vault_config_tfstate_keep_local": True,
+                                    "vault_config_pki_enabled": False,
+                                    "vault_config_approle_secrets": [
+                                        {
+                                            "role_name": "test-role",
+                                            "credential_path": credential_path,
+                                            **({"namespace": target_namespace} if target_namespace is not ... else {}),
+                                        }
+                                    ],
                                     "vault_config_api_url": f"http://127.0.0.1:{server.server_port}",
                                     "vault_config_api_delegate_to": "localhost",
                                     "vault_config_token": "fixture-token",
@@ -162,8 +178,14 @@ class AppRoleRuntimeTests(unittest.TestCase):
                                 },
                                 "tasks": [
                                     {
-                                        "ansible.builtin.include_tasks": str(
-                                            ROOT / "roles/vault_config/tasks/approle.yml"
+                                        (
+                                            "ansible.builtin.import_tasks"
+                                            if config_tags is not None
+                                            else "ansible.builtin.include_tasks"
+                                        ): str(
+                                            ROOT
+                                            / "roles/vault_config/tasks"
+                                            / ("config.yml" if config_tags is not None else "approle.yml")
                                         )
                                     }
                                     for _iteration in range(repeat)
@@ -174,7 +196,20 @@ class AppRoleRuntimeTests(unittest.TestCase):
                     encoding="utf-8",
                 )
                 result = subprocess.run(  # noqa: S603 - fixed local Ansible fixture
-                    [shutil.which("ansible-playbook"), "-i", "localhost,", "-c", "local", str(playbook)],
+                    [
+                        shutil.which("ansible-playbook"),
+                        "-i",
+                        "localhost,",
+                        "-c",
+                        "local",
+                        str(playbook),
+                        *(
+                            ["--start-at-task", "Create AppRole credentials", "--tags", config_tags]
+                            if config_tags is not None
+                            else []
+                        ),
+                        *(["--skip-tags", skip_tags] if skip_tags is not None else []),
+                    ],
                     check=False,
                     capture_output=True,
                     text=True,
@@ -245,6 +280,34 @@ class AppRoleRuntimeTests(unittest.TestCase):
         result, state = self.run_role(target_namespace=..., use_approle=True, repeat=2)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((state["generated"], state["writes"], state["lookups"]), (1, 1, 1))
+
+    def test_invalid_target_namespaces_fail_before_any_api_call(self):
+        for namespace in (False, 0, [], {}, 42):
+            with self.subTest(namespace=namespace):
+                result, state = self.run_role(target_namespace=namespace)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("must be omitted, null, or a string", result.stdout)
+                self.assertEqual((state["calls"], state["generated"], state["writes"]), (0, 0, 0))
+
+    def test_config_plan_and_validate_modes_never_reconcile_credentials(self):
+        for tags in ("terragrunt_plan", "terragrunt_validate", "terragrunt_plan,terragrunt_apply"):
+            with self.subTest(tags=tags):
+                result, state = self.run_role(config_tags=tags)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("Create AppRole credentials", result.stdout)
+                self.assertEqual((state["calls"], state["generated"], state["writes"]), (0, 0, 0))
+
+    def test_config_skipped_apply_never_reconciles_credentials(self):
+        result, state = self.run_role(config_tags="all", skip_tags="terragrunt_apply")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((state["calls"], state["generated"], state["writes"]), (0, 0, 0))
+
+    def test_config_apply_and_default_modes_reconcile_credentials(self):
+        for tags in ("terragrunt_apply", "all"):
+            with self.subTest(tags=tags):
+                result, state = self.run_role(config_tags=tags)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual((state["generated"], state["writes"]), (1, 1))
 
     def test_root_controller_can_manage_child_namespace(self):
         result, state = self.run_role(use_approle=True, target_namespace="child")

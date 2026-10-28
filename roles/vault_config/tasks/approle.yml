@@ -1,4 +1,14 @@
 ---
+- name: Validate AppRole credential target namespace
+  ansible.builtin.assert:
+    that:
+      - >-
+        vault_config_approle.namespace is not defined
+        or vault_config_approle.namespace is none
+        or vault_config_approle.namespace is string
+    fail_msg: AppRole credential namespace must be omitted, null, or a string.
+    quiet: true
+
 - name: Resolve AppRole backend for credential management
   ansible.builtin.set_fact:
     vault_config_approle_backend: >-

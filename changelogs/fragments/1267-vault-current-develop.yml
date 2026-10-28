@@ -2,7 +2,8 @@
 bugfixes:
   - >-
     vault_config - render the plural namespaces input and optionally manage AppRole credentials through
-    the configured backend and KV v2 path after Terraform apply.
+    the configured backend and KV v2 path after Terraform apply, excluding plan/validate runs
+    and rejecting non-string target namespaces before API calls.
   - >-
     vault_deploy - retain explicit data directory ownership instead of applying the post-start
     container ID-map rewrite and exclude Podman kube units from automatic needrestart restarts when installed.

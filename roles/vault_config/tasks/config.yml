@@ -720,6 +720,8 @@
         label: "{{ vault_config_approle.role_name }}"
       when:
         - vault_config_manage_approle_credentials | bool
+        - ansible_run_tags | intersect(['terragrunt_plan', 'terragrunt_validate']) | length == 0
+        - "'terragrunt_apply' not in ansible_skip_tags"
         - not (vault_config_approle.absent | default(false) | bool)
 
   rescue:

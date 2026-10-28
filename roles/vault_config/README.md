@@ -70,6 +70,11 @@ Lightning IT
 With `vault_config_manage_approle_credentials: true`, after Terraform configures
 AppRole roles, Ansible creates missing Secret IDs and
 stores them with the current Role ID in the configured KV v2 credential path.
+Reconciliation runs only on the apply path. Any invocation selecting
+`terragrunt_plan` or `terragrunt_validate` skips it, including mixed tag selections;
+check mode and an explicitly skipped `terragrunt_apply` also perform no credential
+reconciliation. A target namespace must be omitted, null, or a string. Missing/null
+values select root; other types fail before any credential API call.
 The backend key resolves through `vault_config_auth_backends`; the default key is
 `global_approle`. KV mount and path defaults match the Terraform template.
 Entries marked `absent` are skipped. API calls use the role's controller delegate,
