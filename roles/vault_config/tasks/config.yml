@@ -713,12 +713,14 @@
           changed_when: false
 
     - name: Create AppRole credentials
-      ansible.builtin.include_tasks: approle_credentials.yml
+      ansible.builtin.include_tasks: approle.yml
       loop: "{{ vault_config_approle_secrets }}"
       loop_control:
-        loop_var: approle
-        label: "{{ approle.role_name }}"
-
+        loop_var: vault_config_approle
+        label: "{{ vault_config_approle.role_name }}"
+      when:
+        - vault_config_manage_approle_credentials | bool
+        - not (vault_config_approle.absent | default(false) | bool)
 
   rescue:
     - name: Show terragrunt failure summary

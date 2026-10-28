@@ -64,3 +64,32 @@ MIT
 ## Author
 
 Lightning IT
+
+## AppRole credentials
+
+With `vault_config_manage_approle_credentials: true`, after Terraform configures
+AppRole roles, Ansible creates missing Secret IDs and
+stores them with the current Role ID in the configured KV v2 credential path.
+The backend key resolves through `vault_config_auth_backends`; the default key is
+`global_approle`. KV mount and path defaults match the Terraform template.
+Entries marked `absent` are skipped. API calls use the role's controller delegate,
+CA trust and authentication selection. Complete controller AppRole credentials
+are preferred when AppRole authentication is configured; otherwise the
+configuration token is used. Controller AppRole login occurs once per managed
+entry, using `ansible_hashi_vault_mount_point` (default `approle`). The managed
+Secret ID itself is only looked up. The authenticated token needs read access to the role ID and
+KV entry, update access to Secret-ID lookup/creation, and KV create/update access.
+
+Lookup does not log in with the managed Secret ID and does not consume its uses.
+A valid Secret ID is reused; missing or expired credentials are replaced. Errors
+such as denied access stop the run without rotating credentials. KV updates retain
+other fields and use the read version for compare-and-set protection. Secret-ID
+TTL and use limits come from the AppRole configured by Terraform. Check mode
+skips credential creation with the Terraform apply block.
+
+Credential management is disabled by default to preserve existing Terraform
+ownership. Apply the [Terraform KV handoff](https://github.com/ltn-it/terraform-vault-instance/pull/383)
+without destroying the stored entry before enabling this path. A Terraform
+resource that continues to read or write that KV entry can overwrite the Secret
+ID and capture it during state refresh. Historic state backups containing old
+credentials require separate operator-controlled retirement and rotation.

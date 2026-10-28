@@ -12,6 +12,7 @@
       - vault_config_terraform_state_dir_local | default('', true) | trim | length > 0
       - vault_config_api_delegate_to | default('', true) | trim | length > 0
       - vault_config_vault_validate_certs is boolean
+      - vault_config_manage_approle_credentials is boolean
       - vault_config_terragrunt_import_strict is boolean
       - vault_config_terragrunt_state_moves is sequence
       - vault_config_terragrunt_state_moves is not string

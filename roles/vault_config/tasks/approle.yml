@@ -1,0 +1,148 @@
+---
+- name: Resolve AppRole backend for credential management
+  ansible.builtin.set_fact:
+    vault_config_approle_backend: >-
+      {{ vault_config_auth_backends
+         | selectattr('key', 'equalto', vault_config_approle.backend | default('global_approle'))
+         | list }}
+  changed_when: false
+
+- name: Require an unambiguous AppRole backend
+  ansible.builtin.assert:
+    that:
+      - vault_config_approle_backend | length == 1
+      - vault_config_approle_backend[0].type == 'approle'
+      - vault_config_approle_backend[0].path | length > 0
+    fail_msg: AppRole credential management requires its configured auth backend.
+
+- name: Manage AppRole credentials outside Terraform
+  delegate_to: "{{ vault_config_api_delegate_to }}"
+  become: false
+  no_log: true
+  vars:
+    vault_config_approle_api_path: >-
+      auth/{{ vault_config_approle_backend[0].path | regex_replace('^/+|/+$', '')
+      }}/role/{{ vault_config_approle.role_name | urlencode }}
+    vault_config_approle_kv_mount: >-
+      {{ vault_config_approle.kv_mount | default(vault_config_engine_mount_point, true) }}
+    vault_config_approle_kv_path: >-
+      {{ vault_config_approle.credential_path | default(inventory_hostname ~ '/vault/approle', true) }}
+  module_defaults:
+    ansible.builtin.uri:
+      url: "{{ vault_config_api_url | regex_replace('/+$', '') }}/v1/{{ vault_config_approle_api_path }}/role-id"
+      headers:
+        X-Vault-Token: "{{ vault_config_approle_api_token | default(vault_config_token) }}"
+        X-Vault-Namespace: "{{ vault_config_approle.namespace | default('') }}"
+      validate_certs: "{{ vault_config_vault_validate_certs }}"
+      ca_path: "{{ vault_config_api_ca_cert_path_effective | default(omit, true) }}"
+      return_content: true
+      unredirected_headers: [X-Vault-Token, X-Vault-Namespace]
+      follow_redirects: none
+  block:
+    - name: Select AppRole credential management API token
+      ansible.builtin.set_fact:
+        vault_config_approle_api_token: "{{ vault_config_token }}"
+      changed_when: false
+
+    - name: Authenticate credential management with controller AppRole
+      ansible.builtin.uri:
+        url: >-
+          {{ vault_config_api_url | regex_replace('/+$', '') }}/v1/auth/{{
+            ansible_hashi_vault_mount_point | default('approle', true) }}/login
+        method: POST
+        headers:
+          X-Vault-Namespace: "{{ vault_config_approle.namespace | default('') }}"
+        body_format: json
+        body:
+          role_id: "{{ ansible_hashi_vault_role_id }}"
+          secret_id: "{{ ansible_hashi_vault_secret_id }}"
+        status_code: 200
+      register: vault_config_approle_login
+      changed_when: false
+      when:
+        - vault_config_hashi_vault_auth_method | default('approle') == 'approle'
+        - ansible_hashi_vault_role_id | default('', true) | trim | length > 0
+        - ansible_hashi_vault_secret_id | default('', true) | trim | length > 0
+
+    - name: Select authenticated controller AppRole token
+      ansible.builtin.set_fact:
+        vault_config_approle_api_token: "{{ vault_config_approle_login.json.auth.client_token }}"
+      changed_when: false
+      when: not (vault_config_approle_login.skipped | default(false))
+
+    - name: Read current AppRole role ID
+      ansible.builtin.uri:
+        method: GET
+        status_code: 200
+      register: vault_config_approle_role_id
+      changed_when: false
+
+    - name: Read current AppRole credentials
+      ansible.builtin.uri:
+        url: >-
+          {{ vault_config_api_url | regex_replace('/+$', '') }}/v1/{{ vault_config_approle_kv_mount
+          }}/data/{{ vault_config_approle_kv_path }}
+        method: GET
+        status_code: [200, 404]
+      register: vault_config_approle_existing
+      changed_when: false
+
+    - name: Validate stored AppRole secret ID without consuming a use
+      ansible.builtin.uri:
+        url: >-
+          {{ vault_config_api_url | regex_replace('/+$', '') }}/v1/{{ vault_config_approle_api_path }}/secret-id/lookup
+        method: POST
+        body_format: json
+        body:
+          secret_id: "{{ vault_config_approle_existing.json.data.data.secret_id }}"
+        status_code: [200, 400, 404]
+      register: vault_config_approle_lookup
+      changed_when: false
+      when:
+        - vault_config_approle_existing.status == 200
+        - vault_config_approle_existing.json.data.data.secret_id | default('', true) | length > 0
+
+    - name: Reject unexpected AppRole lookup errors
+      ansible.builtin.assert:
+        that:
+          - >-
+            vault_config_approle_lookup.status | default(200) != 400
+            or 'invalid secret id' in
+            (vault_config_approle_lookup.json.errors | default([]) | join(' ') | lower)
+        fail_msg: AppRole lookup returned an unexpected error; credentials were not rotated.
+
+    - name: Create AppRole secret ID only when missing or expired
+      ansible.builtin.uri:
+        url: "{{ vault_config_api_url | regex_replace('/+$', '') }}/v1/{{ vault_config_approle_api_path }}/secret-id"
+        method: POST
+        body_format: json
+        body: {}
+        status_code: 200
+      register: vault_config_approle_generated
+      changed_when: true
+      when: >-
+        vault_config_approle_existing.status == 404
+        or vault_config_approle_existing.json.data.data.secret_id | default('', true) | length == 0
+        or vault_config_approle_lookup.status | default(200) in [400, 404]
+
+    - name: Store AppRole credentials with concurrent update protection
+      ansible.builtin.uri:
+        url: >-
+          {{ vault_config_api_url | regex_replace('/+$', '') }}/v1/{{ vault_config_approle_kv_mount
+          }}/data/{{ vault_config_approle_kv_path }}
+        method: POST
+        body_format: json
+        body: >-
+          {{ {'options': {'cas':
+                (vault_config_approle_existing.json.data.metadata | default({})).version | default(0) | int},
+              'data': (vault_config_approle_existing.json.data.data | default({}))
+                | combine({'role_id': vault_config_approle_role_id.json.data.role_id,
+                           'secret_id': vault_config_approle_generated.json.data.secret_id
+                             if vault_config_approle_generated is changed
+                             else vault_config_approle_existing.json.data.data.secret_id})} | to_json }}
+        status_code: 200
+      changed_when: true
+      when: >-
+        vault_config_approle_generated is changed
+        or vault_config_approle_existing.json.data.data.role_id | default('')
+           != vault_config_approle_role_id.json.data.role_id

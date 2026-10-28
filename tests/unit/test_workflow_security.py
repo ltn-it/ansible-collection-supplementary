@@ -697,7 +697,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             delegated = jobs[name]
             self.assertRegex(
                 delegated["uses"],
-                r"^lightning-it/modulix-validation/\.github/workflows/"
+                r"^ltn-it/modulix-validation/\.github/workflows/"
                 r"collection-quality-profile\.yml@[0-9a-f]{40}$",
             )
             self.assertEqual(profile, delegated["with"]["profile"])
@@ -810,7 +810,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         for job_name in ("heavy-cells", "acceptance-cells"):
             delegated = jobs[job_name]
             self.assertEqual(
-                "lightning-it/modulix-validation/.github/workflows/"
+                "ltn-it/modulix-validation/.github/workflows/"
                 "collection-quality-profile.yml@"
                 "154c99eb0d907b01edc10e9b39c94ef4912fd9dd",
                 delegated["uses"],

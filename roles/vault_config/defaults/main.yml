@@ -88,6 +88,8 @@ vault_config_secret_stores: "{{ vault_secret_stores | default([], true) }}"
 vault_config_policies: "{{ vault_policies | default([], true) }}"
 
 vault_config_approle_secrets: "{{ vault_approle_secrets | default([], true) }}"
+# Enable only after the Terraform KV ownership handoff has been applied.
+vault_config_manage_approle_credentials: false
 vault_config_approle_role_name: "ansible-{{ inventory_hostname }}"
 vault_config_approle_policy_name: "vault-pki-{{ inventory_hostname }}"
 # Optional override for the default policy used by the primary/implicit AppRole.
