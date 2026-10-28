@@ -401,9 +401,23 @@ jobs:
           cd "$collection_root"
           ansible-test sanity --requirements --python "$PYTHON_VERSION"
       - name: Install Vault task integration test collection
-        run: >-
-          ansible-galaxy collection install community.hashi_vault:7.1.0
-          --no-deps --collections-path "$RUNNER_TEMP/policy-collections"
+        run: |
+          python - <<'PYTHON'
+          import os
+          import subprocess
+          from pathlib import Path
+          import yaml
+
+          metadata = yaml.safe_load(Path("galaxy.yml").read_text(encoding="utf-8"))
+          version = metadata["dependencies"]["community.hashi_vault"]
+          if not isinstance(version, str) or not version.strip():
+              raise SystemExit("community.hashi_vault must declare a version in galaxy.yml")
+          subprocess.run(
+              ["ansible-galaxy", "collection", "install", f"community.hashi_vault:{version}",
+               "--no-deps", "--collections-path", str(Path(os.environ["RUNNER_TEMP"]) / "policy-collections")],
+              check=True,
+          )
+          PYTHON
       - name: Run policy and evidence unit tests
         env:
           ANSIBLE_COLLECTIONS_PATH: ${{ runner.temp }}/policy-collections
