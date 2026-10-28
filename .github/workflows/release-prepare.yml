@@ -295,7 +295,7 @@ jobs:
           private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
-          permission-actions: write
+          permission-actions: read
           permission-contents: write
           permission-pull-requests: write
 
@@ -997,10 +997,7 @@ jobs:
             and .user.id == 307565056 and .user.type == "Bot"
           ' <<<"$pull" >/dev/null
           if [ "$REVIEW_ROUTE" = legacy ]; then
-            gh workflow run release-bot-exact-head-review.yml \
-              -f bounded_mode=single --repo "$GITHUB_REPOSITORY" --ref main \
-              -f "pr_number=$PR_NUMBER" -f base_ref=main \
-              -f "expected_base=$GITHUB_SHA" -f "expected_head=$HEAD_SHA"
+            echo 'Native common control evaluates the Release App PR event.'
             gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
               --auto --merge --match-head-commit "$HEAD_SHA"
           else

@@ -1130,7 +1130,8 @@ class NormalReleaseProofTests(unittest.TestCase):
         self.assertIn("outputs.ready == 'true'", prepare["prepare"]["if"])
         script = "\n".join(step.get("run", "") for step in prepare["prepare"]["steps"])
         self.assertIn('"$workflow_source/scripts/normal_release_proof.py" preparation', script)
-        self.assertIn('if [ "$REVIEW_ROUTE" = legacy ]; then\n  gh workflow', script)
+        self.assertIn('if [ "$REVIEW_ROUTE" = legacy ]; then\n  echo', script)
+        self.assertNotIn("gh workflow run release-bot-exact-head-review.yml", script)
         publish = yaml.safe_load((ROOT / ".github/workflows/collection-publish.yml").read_text())["jobs"]["publish"]
         steps = {step["name"]: step for step in publish["steps"]}
         proof = steps["Prove normal preparation ingress and exact approved promotion"]
