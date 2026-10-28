@@ -3,8 +3,13 @@
   ansible.builtin.set_fact:
     vault_config_approle_backend: >-
       {{ vault_config_auth_backends
-         | selectattr('key', 'equalto', vault_config_approle.backend | default('global_approle'))
+         | selectattr('key', 'equalto', vault_config_approle_backend_key)
          | list }}
+  vars:
+    vault_config_approle_backend_key: >-
+      {{ vault_config_approle.backend
+         if (vault_config_approle.backend is defined and vault_config_approle.backend is not none)
+         else 'global_approle' }}
   changed_when: false
 
 - name: Require an unambiguous AppRole backend

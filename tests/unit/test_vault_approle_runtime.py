@@ -33,7 +33,10 @@ class AppRoleRuntimeTests(unittest.TestCase):
         controller_namespace="",
         expiration="0001-01-01T00:00:00Z",
         soft_deleted=False,
+        backend=...,
     ):
+        backend_mount = "alternate-mount" if backend == "secondary" else "custom-mount"
+        role_url_path = f"/v1/auth/{backend_mount}/role/test-role"
         kv_url_path = "/v1/kv/data/" + quote(credential_path, safe="/")
         state: dict[str, Any] = {
             "stored": existing,
@@ -67,7 +70,7 @@ class AppRoleRuntimeTests(unittest.TestCase):
             def do_GET(self):  # noqa: N802
                 if not self.authorized():
                     return
-                if self.path == "/v1/auth/custom-mount/role/test-role/role-id":
+                if self.path == role_url_path + "/role-id":
                     self.reply(200, {"data": {"role_id": "current-role-id"}})
                 elif self.path == kv_url_path:
                     if read_status != 200:
@@ -95,7 +98,7 @@ class AppRoleRuntimeTests(unittest.TestCase):
                     return
                 if not self.authorized():
                     return
-                if self.path.endswith("/secret-id/lookup"):
+                if self.path == role_url_path + "/secret-id/lookup":
                     state["lookups"] += 1
                     status = 200 if body["secret_id"] == "new-secret-id" else lookup  # noqa: S105 - protocol fixture only
                     effective_expiration = (
@@ -108,7 +111,7 @@ class AppRoleRuntimeTests(unittest.TestCase):
                             "errors": ["invalid secret id"] if status == 400 else [],
                         },
                     )
-                elif self.path.endswith("/secret-id"):
+                elif self.path == role_url_path + "/secret-id":
                     state["generated"] += 1
                     self.reply(200, {"data": {"secret_id": "new-secret-id"}})
                 elif self.path == kv_url_path:
@@ -146,12 +149,14 @@ class AppRoleRuntimeTests(unittest.TestCase):
                                     "vault_config_vault_validate_certs": False,
                                     "vault_config_engine_mount_point": "kv",
                                     "vault_config_auth_backends": [
-                                        {"key": "global_approle", "type": "approle", "path": "custom-mount"}
+                                        {"key": "global_approle", "type": "approle", "path": "custom-mount"},
+                                        {"key": "secondary", "type": "approle", "path": "alternate-mount"},
                                     ],
                                     "vault_config_approle": {
                                         "role_name": "test-role",
                                         "credential_path": credential_path,
                                         "namespace": target_namespace,
+                                        **({"backend": backend} if backend is not ... else {}),
                                     },
                                 },
                                 "tasks": [
@@ -187,6 +192,21 @@ class AppRoleRuntimeTests(unittest.TestCase):
         result, state = self.run_role(repeat=2)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((state["generated"], state["writes"], state["lookups"]), (1, 1, 1))
+
+    def test_null_backend_uses_global_approle(self):
+        result, state = self.run_role(backend=None, repeat=2)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((state["generated"], state["writes"], state["lookups"]), (1, 1, 1))
+
+    def test_explicit_backend_selects_its_configured_mount(self):
+        result, state = self.run_role(backend="secondary", repeat=2)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((state["generated"], state["writes"], state["lookups"]), (1, 1, 1))
+
+    def test_explicit_empty_backend_fails_without_creating_credentials(self):
+        result, state = self.run_role(backend="")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((state["generated"], state["writes"]), (0, 0))
 
     def test_valid_secret_reused_and_role_id_repaired_preserving_other_fields(self):
         result, state = self.run_role(existing={"secret_id": "valid-secret-id", "role_id": "old", "extra": "retained"})
