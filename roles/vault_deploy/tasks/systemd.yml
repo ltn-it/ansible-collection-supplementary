@@ -1,4 +1,16 @@
 ---
+- name: needrestart – podman-kube Units von automatischen Neustarts ausnehmen
+  ansible.builtin.copy:
+    dest: /etc/needrestart/conf.d/50-podman-kube.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible
+      # podman-kube@* (e.g. Vault/OpenBao-Pod) disable automatic restart
+      $nrconf{override_rc}->{qr(^podman-kube\@)} = 0;
+    validate: perl -c %s
+
 - name: Manage vault systemd unit
   when:
     - vault_deploy_manage_systemd | bool
