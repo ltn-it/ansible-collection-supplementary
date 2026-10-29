@@ -346,7 +346,7 @@ class SecurityPremergeProofTests(unittest.TestCase):
                 break
         return results, calls.read_text().splitlines(), json.loads(path.read_text())
 
-    def test_actual_readiness_paths_keep_legacy_review_and_merge_but_producer_only_has_neither(self):
+    def test_actual_readiness_paths_use_native_review_and_preserve_producer_only_no_merge(self):
         for kind in ("intake", "preparation"):
             for route in ("legacy", "producer-only"):
                 with self.subTest(kind=kind, route=route):
@@ -357,7 +357,7 @@ class SecurityPremergeProofTests(unittest.TestCase):
                     self.assertFalse(pull["draft"])
                     self.assertEqual(1, sum(item.startswith("pr ready ") for item in operations))
                     self.assertEqual(
-                        1 if route == "legacy" and kind == "preparation" else 0,
+                        0,
                         sum(item.startswith("workflow run release-bot-exact-head-review.yml ") for item in operations),
                     )
                     self.assertEqual(

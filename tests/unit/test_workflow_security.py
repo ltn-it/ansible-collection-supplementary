@@ -1413,7 +1413,8 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         self.assertIn("--draft \\", recovery_text)
         self.assertIn('.user.login == "lightning-it-release-automation[bot]"', recovery_text)
         self.assertIn('gh pr ready "$recovery_pr"', recovery_text)
-        self.assertIn("gh workflow run release-bot-exact-head-review.yml", recovery_text)
+        self.assertNotIn("gh workflow run release-bot-exact-head-review.yml", recovery_text)
+        self.assertIn("Native common control evaluates", recovery_text)
         self.assertNotIn("git push", recovery_text)
         self.assertNotIn("--force", recovery_text)
 
