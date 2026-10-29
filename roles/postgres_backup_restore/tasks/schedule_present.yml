@@ -1,0 +1,187 @@
+---
+- name: Reject symlinks in PostgreSQL backup implementation parent paths
+  ansible.builtin.command:
+    argv:
+      - "{{ postgres_backup_restore_schedule_python_binary }}"
+      - -c
+      - >-
+        import pathlib,sys;
+        sys.exit(any(part.is_symlink() for value in sys.argv[1:]
+        for part in (pathlib.Path(value), *pathlib.Path(value).parents)))
+      - "{{ postgres_backup_restore_backup_dir }}"
+      - "{{ postgres_backup_restore_schedule_pgdata_dir }}"
+      - "{{ postgres_backup_restore_schedule_unit_dir }}"
+      - "{{ postgres_backup_restore_schedule_worker }}"
+      - "{{ postgres_backup_restore_schedule_config }}"
+  changed_when: false
+  check_mode: false
+
+- name: Validate PostgreSQL backup calendars with systemd
+  ansible.builtin.command:
+    argv: [systemd-analyze, calendar, "{{ item }}"]
+  loop: "{{ postgres_backup_restore_schedule_calendar }}"
+  changed_when: false
+  check_mode: false
+
+- name: Inspect prepared PostgreSQL backup paths
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - "{{ postgres_backup_restore_backup_dir }}"
+    - "{{ postgres_backup_restore_schedule_pgdata_dir }}"
+    - "{{ postgres_backup_restore_schedule_home }}/.config"
+    - "{{ postgres_backup_restore_schedule_home }}/.config/systemd"
+    - "{{ postgres_backup_restore_schedule_unit_dir }}"
+  register: postgres_backup_restore_schedule_paths
+
+- name: Reject symlinked PostgreSQL backup or unit paths
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isdir | default(false) and not item.stat.islnk | default(false))
+    fail_msg: Backup, PGDATA and user-unit paths must be real directories.
+  loop: "{{ postgres_backup_restore_schedule_paths.results }}"
+
+- name: Refuse to repurpose an existing non-private PostgreSQL backup directory
+  ansible.builtin.assert:
+    that:
+      - >-
+        not postgres_backup_restore_schedule_paths.results[0].stat.exists or
+        (postgres_backup_restore_schedule_paths.results[0].stat.uid == postgres_backup_restore_schedule_uid | int and
+         postgres_backup_restore_schedule_paths.results[0].stat.mode == '0700')
+      - postgres_backup_restore_schedule_paths.results[1].stat.exists
+    fail_msg: Existing backup data must already be private to the application user; PGDATA must exist.
+
+- name: Validate ownership of existing PostgreSQL backup user-unit directories
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or item.stat.uid == postgres_backup_restore_schedule_uid | int
+      - not item.stat.exists or not item.stat.woth | default(false)
+      - not item.stat.exists or not item.stat.wgrp | default(false)
+    fail_msg: Existing user-unit directories must belong only to the prepared application account.
+  loop: "{{ postgres_backup_restore_schedule_paths.results[2:] }}"
+
+- name: Read the running PostgreSQL image reference
+  ansible.builtin.command:
+    argv:
+      - "{{ postgres_backup_restore_schedule_podman_binary }}"
+      - inspect
+      - --type
+      - container
+      - --format
+      - "{{ '{{.ImageName}}' }}"
+      - "{{ postgres_backup_restore_container_name }}"
+  become: true
+  become_user: "{{ postgres_backup_restore_schedule_user }}"
+  environment: "{{ postgres_backup_restore_schedule_environment }}"
+  args:
+    chdir: "{{ postgres_backup_restore_schedule_home }}"
+  changed_when: false
+  check_mode: false
+  register: postgres_backup_restore_schedule_running_image
+
+- name: Validate the pinned PostgreSQL image before installing a schedule
+  ansible.builtin.assert:
+    that:
+      - postgres_backup_restore_schedule_running_image.stdout | trim == postgres_backup_restore_schedule_image
+    fail_msg: The existing PostgreSQL container does not use the explicitly pinned image.
+
+- name: Create missing PostgreSQL backup user-unit directories
+  ansible.builtin.file:
+    path: "{{ item.item }}"
+    state: directory
+    owner: "{{ postgres_backup_restore_schedule_user }}"
+    group: "{{ postgres_backup_restore_schedule_group }}"
+    mode: "0700"
+  loop: "{{ postgres_backup_restore_schedule_paths.results[2:] }}"
+  when: not item.stat.exists
+
+- name: Create the private PostgreSQL backup-set directory
+  ansible.builtin.file:
+    path: "{{ postgres_backup_restore_backup_dir }}"
+    state: directory
+    owner: "{{ postgres_backup_restore_schedule_user }}"
+    group: "{{ postgres_backup_restore_schedule_group }}"
+    mode: "0700"
+
+- name: Inspect PostgreSQL backup implementation directories
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - /usr/local/libexec
+    - /etc/lit-postgres-backup
+  register: postgres_backup_restore_schedule_implementation_dirs
+
+- name: Validate existing PostgreSQL backup implementation directories
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isdir | default(false) and not item.stat.islnk | default(false))
+      - not item.stat.exists or item.stat.uid == 0
+      - not item.stat.exists or not item.stat.woth | default(false)
+      - not item.stat.exists or not item.stat.wgrp | default(false)
+    fail_msg: Backup implementation directories must be root-owned and not writable by other accounts.
+  loop: "{{ postgres_backup_restore_schedule_implementation_dirs.results }}"
+
+- name: Create missing PostgreSQL backup implementation directories
+  ansible.builtin.file:
+    path: "{{ item.item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ postgres_backup_restore_schedule_implementation_dirs.results }}"
+  when: not item.stat.exists
+
+- name: Install the instance-specific PostgreSQL backup worker
+  ansible.builtin.copy:
+    src: scheduled_backup.py
+    dest: "{{ postgres_backup_restore_schedule_worker }}"
+    owner: root
+    group: root
+    mode: "0644"
+    follow: false
+
+- name: Install the PostgreSQL backup configuration
+  ansible.builtin.template:
+    src: scheduled-backup.json.j2
+    dest: "{{ postgres_backup_restore_schedule_config }}"
+    owner: root
+    group: "{{ postgres_backup_restore_schedule_group }}"
+    mode: "0640"
+    validate: >-
+      {{
+        omit if ansible_check_mode else
+        postgres_backup_restore_schedule_python_binary ~ ' ' ~
+        postgres_backup_restore_schedule_worker ~ ' --config %s --validate'
+      }}
+
+- name: Install PostgreSQL backup user units
+  ansible.builtin.template:
+    src: "scheduled-backup.{{ item }}.j2"
+    dest: "{{ postgres_backup_restore_schedule_unit_dir }}/{{ postgres_backup_restore_schedule_unit }}.{{ item }}"
+    owner: "{{ postgres_backup_restore_schedule_user }}"
+    group: "{{ postgres_backup_restore_schedule_group }}"
+    mode: "0600"
+  loop: [service, timer]
+  register: postgres_backup_restore_schedule_units
+
+- name: Reload the PostgreSQL backup user manager after unit changes
+  ansible.builtin.systemd_service:
+    scope: user
+    daemon_reload: true
+  become: true
+  become_user: "{{ postgres_backup_restore_schedule_user }}"
+  environment: "{{ postgres_backup_restore_schedule_environment }}"
+  when: postgres_backup_restore_schedule_units.changed
+
+- name: Reconcile the PostgreSQL backup timer
+  ansible.builtin.systemd_service:
+    name: "{{ postgres_backup_restore_schedule_unit }}.timer"
+    scope: user
+    enabled: "{{ postgres_backup_restore_schedule_enabled }}"
+    state: "{{ 'started' if postgres_backup_restore_schedule_enabled else 'stopped' }}"
+  become: true
+  become_user: "{{ postgres_backup_restore_schedule_user }}"
+  environment: "{{ postgres_backup_restore_schedule_environment }}"
+  when: not ansible_check_mode

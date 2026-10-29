@@ -1,0 +1,86 @@
+---
+- name: Reject symlinks in PostgreSQL backup removal paths
+  ansible.builtin.command:
+    argv:
+      - "{{ postgres_backup_restore_schedule_python_binary }}"
+      - -c
+      - >-
+        import pathlib,sys;
+        sys.exit(any(part.is_symlink() for value in sys.argv[1:]
+        for part in (pathlib.Path(value), *pathlib.Path(value).parents)))
+      - "{{ postgres_backup_restore_schedule_unit_dir }}"
+      - "{{ postgres_backup_restore_schedule_worker }}"
+      - "{{ postgres_backup_restore_schedule_config }}"
+  changed_when: false
+  check_mode: false
+
+- name: Read the installed PostgreSQL backup timer state
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - --user
+      - show
+      - "{{ postgres_backup_restore_schedule_unit }}.timer"
+      - --property=LoadState
+      - --value
+  become: true
+  become_user: "{{ postgres_backup_restore_schedule_user }}"
+  environment: "{{ postgres_backup_restore_schedule_environment }}"
+  changed_when: false
+  check_mode: false
+  register: postgres_backup_restore_schedule_timer_state
+
+- name: Stop and disable the PostgreSQL backup timer
+  ansible.builtin.systemd_service:
+    name: "{{ postgres_backup_restore_schedule_unit }}.timer"
+    scope: user
+    enabled: false
+    state: stopped
+  become: true
+  become_user: "{{ postgres_backup_restore_schedule_user }}"
+  environment: "{{ postgres_backup_restore_schedule_environment }}"
+  when:
+    - postgres_backup_restore_schedule_timer_state.stdout | trim != 'not-found'
+    - not ansible_check_mode
+
+- name: Read the PostgreSQL backup worker state
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - --user
+      - show
+      - "{{ postgres_backup_restore_schedule_unit }}.service"
+      - --property=ActiveState
+      - --value
+  become: true
+  become_user: "{{ postgres_backup_restore_schedule_user }}"
+  environment: "{{ postgres_backup_restore_schedule_environment }}"
+  changed_when: false
+  check_mode: false
+  register: postgres_backup_restore_schedule_worker_state
+
+- name: Preserve implementation files while a PostgreSQL backup is running
+  ansible.builtin.assert:
+    that:
+      - postgres_backup_restore_schedule_worker_state.stdout | trim not in ['active', 'activating', 'deactivating']
+    fail_msg: Timer disabled; let the in-flight backup finish and repeat removal. Backup files are retained.
+
+- name: Remove only the instance-specific PostgreSQL backup implementation
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ postgres_backup_restore_schedule_unit_dir }}/{{ postgres_backup_restore_schedule_unit }}.timer"
+    - "{{ postgres_backup_restore_schedule_unit_dir }}/{{ postgres_backup_restore_schedule_unit }}.service"
+    - "{{ postgres_backup_restore_schedule_config }}"
+    - "{{ postgres_backup_restore_schedule_worker }}"
+  register: postgres_backup_restore_schedule_removed
+
+- name: Reload the PostgreSQL backup user manager after removal
+  ansible.builtin.systemd_service:
+    scope: user
+    daemon_reload: true
+  become: true
+  become_user: "{{ postgres_backup_restore_schedule_user }}"
+  environment: "{{ postgres_backup_restore_schedule_environment }}"
+  when: postgres_backup_restore_schedule_removed.changed

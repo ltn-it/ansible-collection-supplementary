@@ -1,0 +1,18 @@
+[Unit]
+Description=PostgreSQL backup {{ postgres_backup_restore_schedule_instance }}
+{% if postgres_backup_restore_schedule_after | length > 0 %}
+After={{ postgres_backup_restore_schedule_after | join(' ') }}
+{% endif %}
+
+[Service]
+Type=oneshot
+WorkingDirectory={{ postgres_backup_restore_schedule_home }}
+Environment=HOME={{ postgres_backup_restore_schedule_home }}
+Environment=XDG_RUNTIME_DIR=/run/user/{{ postgres_backup_restore_schedule_uid }}
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ postgres_backup_restore_schedule_uid }}/bus
+UMask=0077
+NoNewPrivileges=true
+TimeoutStartSec={{ (postgres_backup_restore_schedule_timeout_seconds | int) + 60 }}
+ExecStart={{ postgres_backup_restore_schedule_python_binary }} {{ postgres_backup_restore_schedule_worker }} --config {{ postgres_backup_restore_schedule_config }} --run --kind scheduled
+StandardOutput=journal
+StandardError=journal

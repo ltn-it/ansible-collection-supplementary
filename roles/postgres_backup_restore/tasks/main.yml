@@ -3,6 +3,15 @@
   ansible.builtin.import_tasks: assert.yml
   tags: always
 
+- name: Manage scheduled PostgreSQL backups
+  ansible.builtin.include_tasks: schedule.yml
+  when:
+    - postgres_backup_restore_action == 'schedule'
+    - postgres_backup_restore_execute | bool
+  tags:
+    - backup
+    - schedule
+
 - name: Report disabled PostgreSQL backup/restore
   ansible.builtin.debug:
     msg: "PostgreSQL backup/restore disabled."

@@ -4,6 +4,7 @@ postgres_backup_restore_allowed_actions:
   - none
   - backup
   - restore
+  - schedule
 postgres_backup_restore_execute: false
 
 postgres_backup_restore_backup_dir: "/srv/postgres/backups"
@@ -31,3 +32,38 @@ postgres_backup_restore_create_db: false
 postgres_backup_restore_extra_pg_dump_args: []
 postgres_backup_restore_extra_pg_restore_args: []
 postgres_backup_restore_extra_psql_args: []
+
+# Scheduled backups use an already running, digest-pinned rootless Podman
+# container and its existing local Unix-socket authentication. No OS provisioning.
+postgres_backup_restore_schedule_state: present
+postgres_backup_restore_schedule_enabled: false
+postgres_backup_restore_schedule_instance: ""
+postgres_backup_restore_schedule_user: ""
+postgres_backup_restore_schedule_group: ""
+postgres_backup_restore_schedule_uid: 0
+postgres_backup_restore_schedule_home: ""
+postgres_backup_restore_schedule_pgdata_dir: ""
+postgres_backup_restore_schedule_pgdata_mount: /var/lib/postgresql/data
+postgres_backup_restore_schedule_socket_dir: /var/run/postgresql
+postgres_backup_restore_schedule_socket_port: 5432
+postgres_backup_restore_schedule_image: "{{ postgres_deploy_image | default('', true) }}"
+postgres_backup_restore_schedule_source_revision: ""
+postgres_backup_restore_schedule_calendar:
+  - "*-*-* 00:00:00 UTC"
+postgres_backup_restore_schedule_after: []
+postgres_backup_restore_schedule_retention_days: 14
+postgres_backup_restore_schedule_min_free_percent: 20
+postgres_backup_restore_schedule_timeout_seconds: 1800
+postgres_backup_restore_schedule_max_age_seconds: 90000
+postgres_backup_restore_schedule_podman_binary: /usr/bin/podman
+postgres_backup_restore_schedule_python_binary: /usr/bin/python3
+postgres_backup_restore_schedule_unit: "postgres-backup-{{ postgres_backup_restore_schedule_instance }}"
+postgres_backup_restore_schedule_worker: >-
+  /usr/local/libexec/lit-postgres-backup-{{ postgres_backup_restore_schedule_instance }}.py
+postgres_backup_restore_schedule_config: >-
+  /etc/lit-postgres-backup/{{ postgres_backup_restore_schedule_instance }}.json
+postgres_backup_restore_schedule_unit_dir: "{{ postgres_backup_restore_schedule_home }}/.config/systemd/user"
+postgres_backup_restore_schedule_environment:
+  HOME: "{{ postgres_backup_restore_schedule_home }}"
+  XDG_RUNTIME_DIR: "/run/user/{{ postgres_backup_restore_schedule_uid }}"
+  DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ postgres_backup_restore_schedule_uid }}/bus"

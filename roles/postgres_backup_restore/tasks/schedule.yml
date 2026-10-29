@@ -1,0 +1,41 @@
+---
+- name: Read the prepared PostgreSQL backup account
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ postgres_backup_restore_schedule_user }}"
+  register: postgres_backup_restore_schedule_account
+
+- name: Read the prepared PostgreSQL backup group
+  ansible.builtin.getent:
+    database: group
+    key: "{{ postgres_backup_restore_schedule_group }}"
+  register: postgres_backup_restore_schedule_account_group
+
+- name: Validate the prepared PostgreSQL backup account mapping
+  ansible.builtin.assert:
+    that:
+      - >-
+        postgres_backup_restore_schedule_account.ansible_facts.getent_passwd[
+          postgres_backup_restore_schedule_user][1] | int == postgres_backup_restore_schedule_uid | int
+      - >-
+        postgres_backup_restore_schedule_account.ansible_facts.getent_passwd[
+          postgres_backup_restore_schedule_user][4] == postgres_backup_restore_schedule_home
+      - >-
+        postgres_backup_restore_schedule_account.ansible_facts.getent_passwd[
+          postgres_backup_restore_schedule_user][2] ==
+        postgres_backup_restore_schedule_account_group.ansible_facts.getent_group[
+          postgres_backup_restore_schedule_group][1]
+    fail_msg: Backup account, UID, primary group or home differs from the prepared OS state.
+
+- name: Read the PostgreSQL backup user-manager state
+  ansible.builtin.command:
+    argv: [systemctl, --user, show-environment]
+  become: true
+  become_user: "{{ postgres_backup_restore_schedule_user }}"
+  environment: "{{ postgres_backup_restore_schedule_environment }}"
+  changed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Manage installed PostgreSQL backup schedule
+  ansible.builtin.include_tasks: "schedule_{{ postgres_backup_restore_schedule_state }}.yml"

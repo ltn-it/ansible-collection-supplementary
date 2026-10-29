@@ -1,0 +1,7 @@
+---
+minor_changes:
+  - >-
+    postgres_backup_restore - add opt-in rootless Podman backup scheduling with a
+    user systemd timer, atomic private backup sets, password-free role exports,
+    archive and checksum validation, conservative scheduled-set retention,
+    manual restore-point preservation and a read-only status/verification CLI.
