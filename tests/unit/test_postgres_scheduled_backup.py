@@ -218,6 +218,7 @@ class ScheduledBackupTests(unittest.TestCase):
         self.assertTrue(canary not in str(error.exception), "Child diagnostics leaked.")
         self.assertTrue(canary not in json.dumps(invoked.call_args.kwargs["env"]), "Ambient credential forwarded.")
         self.assertTrue(all(canary not in value for value in invoked.call_args.args[0]), "Credential in argv.")
+        self.assertEqual(invoked.call_args.kwargs["stdin"], subprocess.DEVNULL)
 
     def test_cli_failure_redacts_unexpected_secret_fields(self):
         canary = secrets.token_urlsafe(24)
@@ -243,7 +244,8 @@ class ScheduledBackupTests(unittest.TestCase):
             arguments[index + 1 :],
             ["env", "-u", "PGPASSWORD", "-u", "PGSERVICE", "-u", "PGSERVICEFILE", "pg_dump", "--version"],
         )
-        self.assertIn("PGPASSFILE=/dev/null", arguments)
+        self.assertIn("PGPASSFILE=/dev/null/lit-postgres-no-password", arguments)
+        self.assertNotIn("PGPASSFILE=/dev/null", arguments)
 
     def test_retention_preserves_a_set_with_modified_payload(self):
         old = self.old_set("c" * 12)

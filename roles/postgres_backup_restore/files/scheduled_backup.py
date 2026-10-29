@@ -192,7 +192,7 @@ class Commands:
             # No shell: the trusted config pins the binary; argv is built from validated fields.
             result = subprocess.run(  # noqa: S603
                 [self.config["podman_binary"]] + arguments,
-                stdin=input_stream,
+                stdin=input_stream if input_stream is not None else subprocess.DEVNULL,
                 stdout=output if output is not None else subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 timeout=remaining,
@@ -264,7 +264,9 @@ class Commands:
             "--env",
             "PGDATABASE=" + config["database"],
             "--env",
-            "PGPASSFILE=/dev/null",
+            # A path below the null device cannot exist. /dev/null itself emits
+            # a libpq warning because it is not a regular password file.
+            "PGPASSFILE=/dev/null/lit-postgres-no-password",
             config["container"],
             "env",
             "-u",
