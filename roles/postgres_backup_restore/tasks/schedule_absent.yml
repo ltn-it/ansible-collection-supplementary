@@ -74,13 +74,7 @@
     - "{{ postgres_backup_restore_schedule_unit_dir }}/{{ postgres_backup_restore_schedule_unit }}.service"
     - "{{ postgres_backup_restore_schedule_config }}"
     - "{{ postgres_backup_restore_schedule_worker }}"
-  register: postgres_backup_restore_schedule_removed
+  notify: Postgres backup reload user manager
 
-- name: Reload the PostgreSQL backup user manager after removal
-  ansible.builtin.systemd_service:
-    scope: user
-    daemon_reload: true
-  become: true
-  become_user: "{{ postgres_backup_restore_schedule_user }}"
-  environment: "{{ postgres_backup_restore_schedule_environment }}"
-  when: postgres_backup_restore_schedule_removed.changed
+- name: Apply pending PostgreSQL backup user-unit removal reloads
+  ansible.builtin.meta: flush_handlers

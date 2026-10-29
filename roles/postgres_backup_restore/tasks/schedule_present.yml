@@ -164,16 +164,10 @@
     group: "{{ postgres_backup_restore_schedule_group }}"
     mode: "0600"
   loop: [service, timer]
-  register: postgres_backup_restore_schedule_units
+  notify: Postgres backup reload user manager
 
-- name: Reload the PostgreSQL backup user manager after unit changes
-  ansible.builtin.systemd_service:
-    scope: user
-    daemon_reload: true
-  become: true
-  become_user: "{{ postgres_backup_restore_schedule_user }}"
-  environment: "{{ postgres_backup_restore_schedule_environment }}"
-  when: postgres_backup_restore_schedule_units.changed
+- name: Apply pending PostgreSQL backup user-unit reloads before managing the timer
+  ansible.builtin.meta: flush_handlers
 
 - name: Reconcile the PostgreSQL backup timer
   ansible.builtin.systemd_service:
