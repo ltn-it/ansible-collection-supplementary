@@ -264,14 +264,15 @@ class Commands:
             "--env",
             "PGDATABASE=" + config["database"],
             "--env",
-            "PGPASSWORD=",
-            "--env",
             "PGPASSFILE=/dev/null",
-            "--env",
-            "PGSERVICE=",
-            "--env",
-            "PGSERVICEFILE=/dev/null",
             config["container"],
+            "env",
+            "-u",
+            "PGPASSWORD",
+            "-u",
+            "PGSERVICE",
+            "-u",
+            "PGSERVICEFILE",
         ]
         if stream_output:
             return self.stream_run(options + arguments, category, output)
@@ -364,7 +365,7 @@ def prune(root, config, now, keep):
         if directory.name == keep or not SET_ID.fullmatch(directory.name):
             continue
         try:
-            manifest, _ = checked_manifest(directory, config)
+            manifest = verify_set(directory, config)
             expired = parse_stamp(manifest["snapshot_utc"]) < cutoff
             scheduled = manifest["kind"] == "scheduled"
         except (Failure, OSError, ValueError, KeyError, TypeError):

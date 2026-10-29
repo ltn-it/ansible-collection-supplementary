@@ -16,7 +16,7 @@ Consume the collection's Ansible baseline in
 Scheduling requires Linux, Python 3.9 or later, an existing non-root application
 account with a persistent systemd user manager, and an already running,
 digest-pinned Podman PostgreSQL container. The container must provide `pg_dump`,
-`pg_dumpall` and `pg_restore` and authorize the configured existing user over its
+`pg_dumpall`, `pg_restore` and `env -u`, and authorize the configured existing user over its
 local Unix socket. OS preparation and database lifecycle remain with their
 owning roles; this role never changes packages, accounts, lingering, system
 timezone or PostgreSQL authentication.

@@ -67,13 +67,7 @@ class ScheduledBackupTests(unittest.TestCase):
                     return None
                 if category == "archive":
                     test.assertIsNotNone(input_stream)
-                    test.assertFalse(
-                        any(
-                            SET.name.endswith(".partial") is False
-                            for SET in test.backups.iterdir()
-                            if WORKER.SET_ID.fullmatch(SET.name)
-                        )
-                    )
+                    test.assertTrue(Path(input_stream.name).parent.name.endswith(".partial"))
                     return None
                 if category == "version":
                     return b"pg_dump (PostgreSQL) 16.15\n"
@@ -238,6 +232,24 @@ class ScheduledBackupTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 2)
         self.assertTrue(canary not in result.stdout + result.stderr, "Configuration diagnostic leaked.")
+
+    def test_client_unsets_service_variables_instead_of_selecting_an_empty_service(self):
+        commands = WORKER.Commands(self.config)
+        with mock.patch.object(commands, "run", return_value=b"") as invoked:
+            commands.client(["pg_dump", "--version"], "version")
+        arguments = invoked.call_args.args[0]
+        index = arguments.index(self.config["container"])
+        self.assertEqual(
+            arguments[index + 1 :],
+            ["env", "-u", "PGPASSWORD", "-u", "PGSERVICE", "-u", "PGSERVICEFILE", "pg_dump", "--version"],
+        )
+        self.assertIn("PGPASSFILE=/dev/null", arguments)
+
+    def test_retention_preserves_a_set_with_modified_payload(self):
+        old = self.old_set("c" * 12)
+        (old / "database.dump").write_bytes(b"modified-payload")
+        self.assertEqual(self.run_backup(), 0)
+        self.assertTrue(old.exists())
 
     def test_manual_restore_point_does_not_trigger_automatic_pruning(self):
         old = self.old_set("a" * 12)
