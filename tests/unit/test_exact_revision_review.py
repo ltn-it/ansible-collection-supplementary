@@ -712,7 +712,7 @@ class ExactRevisionWorkflowContractTests(unittest.TestCase):
         self.assertNotIn(".head_sha == $controller_sha", human_path)
 
     def test_release_app_pr_creators_finalize_draft_once(self) -> None:
-        # Release metadata still needs Exact-Revision review. A develop-to-main
+        # Release metadata uses native common review. A develop-to-main
         # promotion instead opens with v2 native-ingress aggregation evidence.
         for name in (
             "release-prepare.yml",
@@ -723,13 +723,13 @@ class ExactRevisionWorkflowContractTests(unittest.TestCase):
                 self.assertIn("--draft", workflow)
                 self.assertIn("gh pr ready", workflow)
                 self.assertIn("lightning-it-release-automation[bot]", workflow)
-                self.assertIn("gh workflow run release-bot-exact-head-review.yml", workflow)
-                self.assertIn("permission-actions: write", workflow)
-                self.assertIn("expected_base=", workflow)
-                self.assertIn("expected_head=", workflow)
+                self.assertNotIn("gh workflow run release-bot-exact-head-review.yml", workflow)
+                self.assertIn("permission-actions: read", workflow)
+                self.assertIn(".base.sha == $base", workflow)
+                self.assertIn(".head.sha == $head", workflow)
                 self.assertLess(
                     workflow.index("gh pr ready"),
-                    workflow.index("gh workflow run release-bot-exact-head-review.yml"),
+                    workflow.index("Native common control evaluates"),
                 )
         ancestry = (ROOT / ".github/workflows/sync-main-to-develop.yml").read_text(encoding="utf-8")
         self.assertNotIn("--draft", ancestry)
@@ -749,10 +749,7 @@ class ExactRevisionWorkflowContractTests(unittest.TestCase):
         self.assertIn('gh pr ready "$existing" --repo "$GITHUB_REPOSITORY"', release_prepare)
         release_edit = release_prepare.split('gh pr edit "$existing"', 1)[1].split("--title", 1)[0]
         self.assertIn('--repo "$GITHUB_REPOSITORY"', release_edit)
-        release_dispatch = release_prepare.split("gh workflow run release-bot-exact-head-review.yml", 1)[1].split(
-            "expected_head", 1
-        )[0]
-        self.assertIn('--repo "$GITHUB_REPOSITORY"', release_dispatch)
+        self.assertNotIn("gh workflow run release-bot-exact-head-review.yml", release_prepare)
 
     def test_exact_revision_result_is_validated_as_one_object(self) -> None:
         workflow = (ROOT / ".github/workflows/release-bot-exact-head-review.yml").read_text(encoding="utf-8")
