@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -358,6 +359,55 @@ class CompletionTests(unittest.TestCase):
             self.assertIsInstance(gate, bool)
             self.assertTrue(gate)
 
+    def test_raw_release_and_asset_reads_are_offline_and_preserve_completion_verification(self):
+        raw = self.root / "observations"
+        raw.mkdir()
+        index = {"version": 1, "repository": REPO, "calls": {}, "logs": {}, "artifacts": {}, "assets": {}}
+        path = f"repos/{REPO}/releases/tags/v1.0.1"
+        index["calls"][path] = "read-0.json"
+        (raw / "read-0.json").write_text(json.dumps(self.published))
+        for asset in self.published["assets"]:
+            name = f"asset-{asset['id']}.bin"
+            source = self.directory if asset["name"] in {ARCHIVE.COMPLETION, ARCHIVE.COMPLETION_BUNDLE} else self.assets
+            (raw / name).write_bytes((source / asset["name"]).read_bytes())
+            index["assets"][str(asset["id"])] = name
+        (raw / "index.json").write_text(json.dumps(index))
+        # Only the signature boundary is mocked; no API/downloader fallback is
+        # permitted, and the original profile/manifest/byte checks are actual.
+        with (
+            ARCHIVE.observation_reads(raw, REPO),
+            patch.object(ARCHIVE.subprocess, "Popen", side_effect=AssertionError("network fallback")),
+            patch.object(ARCHIVE, "verified_document", return_value=self.value),
+        ):
+            self.assertEqual(self.published, ARCHIVE.read_release(self.context))
+            output = self.root / "raw-reuse"
+            self.assertTrue(ARCHIVE.completion_prepare(self.assets, output, self.context))
+            for name in (ARCHIVE.COMPLETION, ARCHIVE.COMPLETION_BUNDLE):
+                self.assertEqual((self.directory / name).read_bytes(), (output / name).read_bytes())
+            asset = self.published["assets"][0]
+            original = (raw / index["assets"][str(asset["id"])]).read_bytes()
+            (raw / index["assets"][str(asset["id"])]).write_bytes(b"x" * len(original))
+            with self.assertRaisesRegex(ValueError, "asset-digest"):
+                ARCHIVE.download_assets(self.published, REPO, None, ((asset["name"], asset["size"]),))
+        self.assertIsNone(ARCHIVE._OBSERVATIONS)  # pylint: disable=protected-access
+        for defect in ("missing", "foreign", "unsafe", "extra", "duplicate"):
+            changed = copy.deepcopy(index)
+            if defect == "missing":
+                (raw / "read-0.json").unlink()
+            elif defect == "foreign":
+                changed["repository"] = "lightning-it/foreign"
+            elif defect == "unsafe":
+                changed["calls"][path] = "../read-0.json"
+            elif defect == "extra":
+                (raw / "unbound").write_text("not a native observation")
+            else:
+                changed["calls"][f"repos/{REPO}/releases/tags/v9.9.9"] = "read-0.json"
+            (raw / "index.json").write_text(json.dumps(changed))
+            with self.subTest(defect=defect), self.assertRaises(ValueError), ARCHIVE.observation_reads(raw, REPO):
+                pass
+            (raw / "read-0.json").write_text(json.dumps(self.published))
+            (raw / "unbound").unlink(missing_ok=True)
+
     def test_missing_duplicate_foreign_or_changed_assets_deny_complete_signed_claim(self):
         original = copy.deepcopy(self.published)
         mutations = (
@@ -529,7 +579,18 @@ class CompletionTests(unittest.TestCase):
             write("incoming/evidence/long-term/" + name)
         workflow = yaml.safe_load((ROOT / ".github/workflows/collection-publish.yml").read_text())
         steps = {step.get("name"): step for step in workflow["jobs"]["publish"]["steps"]}
-        environment = {**os.environ, "BASH_ENV": os.devnull, "CANDIDATE_NAME": candidate}
+        from tests.unit.test_normal_release_proof import install_ee_dispatcher
+
+        install_ee_dispatcher(product)
+        home = self.root / "ee-home"
+        home.mkdir()
+        environment = {
+            **os.environ,
+            "BASH_ENV": os.devnull,
+            "CANDIDATE_NAME": candidate,
+            "GITHUB_WORKSPACE": str(product),
+            "HOME": str(home),
+        }
         result = subprocess.run(  # noqa: S603 -- actual offline assembly fixture, no native command.
             ["/bin/bash", "-c", steps["Assemble verified release attachments"]["run"]],
             cwd=product,

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import copy
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -12,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -24,6 +27,26 @@ PROOF = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PROOF)
 REPOSITORY = "lightning-it/ansible-collection-supplementary"
 REAL_VERIFY_COMPLETION = getattr(PROOF.archive, "verify_completion", None)
+
+
+def install_ee_dispatcher(root, prefix=""):
+    """Substitute the outer mount only; fixture commands already run inside EE.
+
+    Native I/O seams are explicit fixture prefixes. This never qualifies an
+    image, network access, production identity or protected check.
+    """
+    scripts = root / "scripts"
+    scripts.mkdir(exist_ok=True)
+    (scripts / "wunder-devtools-ee.sh").write_text(
+        "#!/bin/bash\nset -euo pipefail\n" + prefix + "\n"
+        "unset GH_TOKEN GITHUB_TOKEN\n"
+        'if [ "${1:-}" = bash ] && [ "${2:-}" = -c ]; then\n'
+        '  program="${3//\\/workspace/$PWD}"\nshift 3\n'
+        '  exec bash -c "$program" "$@"\n'
+        "fi\n"
+        'arguments=()\nfor argument; do arguments+=("${argument//\\/workspace/$PWD}"); done\n'
+        'exec "${arguments[@]}"\n'
+    )
 
 
 class NativeControlPolicyContractTests(unittest.TestCase):
@@ -922,6 +945,9 @@ class NormalReleaseProofTests(unittest.TestCase):
         steps = {step["id"]: step for step in jobs["normal-readiness"]["steps"] if "id" in step}
         self.git("remote", "add", "origin", str(self.root))
         (self.root / "scripts").mkdir()
+        # This fixture already runs inside the pinned EE. Exercise the actual
+        # workflow's dispatcher arguments without trying nested containers.
+        (self.root / "scripts/wunder-devtools-ee.sh").write_text('#!/bin/bash\nset -euo pipefail\nexec "$@"\n')
         for name in ("release-version.py", "security_release_contract.py"):
             shutil.copyfile(ROOT / "scripts" / name, self.root / "scripts" / name)
         content = self.root / "release-readiness-content"
@@ -1069,6 +1095,7 @@ class NormalReleaseProofTests(unittest.TestCase):
         prepare = yaml.safe_load((ROOT / ".github/workflows/release-prepare.yml").read_text())["jobs"]
         step = next(step for step in prepare["normal-readiness"]["steps"] if step.get("id") == "need")
         (self.root / "scripts").mkdir()
+        (self.root / "scripts/wunder-devtools-ee.sh").write_text('#!/bin/bash\nset -euo pipefail\nexec "$@"\n')
         for name in ("release-version.py", "security_release_contract.py"):
             shutil.copyfile(ROOT / "scripts" / name, self.root / "scripts" / name)
         content = self.root / "release-readiness-content"
@@ -1141,6 +1168,292 @@ class NormalReleaseProofTests(unittest.TestCase):
 
 class RealNativeArchiveTests(unittest.TestCase):
     """Synthetic native transport, actual pinned reader and actual Git graph."""
+
+    def association_fence(self, fixture, core, collected, fresh):
+        """Actual bb1 selection and the final fence observe mapping-only drift."""
+        index = json.loads((fresh / "index.json").read_text())
+        pull = fixture.promotion
+        for endpoint in (
+            "actions/runs/30",
+            "actions/runs/30/attempts/1",
+            f"actions/runs?head_sha={pull['head']['sha']}&per_page=100&page=1",
+        ):
+            path = f"repos/{REPOSITORY}/{endpoint}"
+            leaf = fresh / index["calls"][path]
+            original = leaf.read_bytes()
+            baseline = json.loads(original)
+            self.assertEqual({"fresh": True}, PROOF.native_fence(core, collected, fresh, REPOSITORY, "1103407173"))
+            for change in ("missing", "empty", "foreign", "base", "head", "ambiguous", "null", "malformed"):
+                with self.subTest(endpoint=endpoint, association=change):
+                    value = copy.deepcopy(baseline)
+                    run = value["workflow_runs"][0] if "workflow_runs" in value else value
+                    association = copy.deepcopy(run["pull_requests"][0])
+                    if change == "missing":
+                        del run["pull_requests"]
+                    elif change == "empty":
+                        run["pull_requests"] = []
+                    elif change == "foreign":
+                        association["number"] += 100
+                        run["pull_requests"] = [association]
+                    elif change in {"base", "head"}:
+                        association[change]["sha"] = "0" * 40
+                        run["pull_requests"] = [association]
+                    elif change == "ambiguous":
+                        run["pull_requests"] = [association, copy.deepcopy(association)]
+                    else:
+                        run["pull_requests"] = None if change == "null" else [None]
+
+                    def candidates(observed_run):
+                        # Missing/empty mappings on a merged PR may use its already
+                        # authenticated operation binding. They do not equal the
+                        # originally observed explicit association at this fence.
+                        return core.ingress_candidates(
+                            None,
+                            REPOSITORY,
+                            pull,
+                            [PROOF.CONTROL_SOURCE],
+                            [observed_run],
+                            {(observed_run["id"], observed_run["run_attempt"]): True},
+                            read_operations=False,
+                        )
+
+                    if change in {"missing", "empty"}:
+                        self.assertEqual([run], candidates(run))
+                    elif change == "ambiguous":
+                        with self.assertRaisesRegex(core.ControlError, "ingress-association-ambiguous"):
+                            candidates(run)
+                    elif change in {"null", "malformed"}:
+                        with self.assertRaises((TypeError, AttributeError)):
+                            candidates(run)
+                    else:
+                        self.assertEqual([], candidates(run))
+                    leaf.write_text(json.dumps(value))
+                    try:
+                        with self.assertRaisesRegex(ValueError, "normal-native-(freshness|generation)"):
+                            PROOF.native_fence(core, collected, fresh, REPOSITORY, "1103407173")
+                    finally:
+                        leaf.write_bytes(original)
+            self.assertEqual({"fresh": True}, PROOF.native_fence(core, collected, fresh, REPOSITORY, "1103407173"))
+            # Preserve absence as well as the value; absent->null must not be
+            # collapsed, because actual bb1 accepts only the former fallback.
+            initial_index = json.loads((collected / "index.json").read_text())
+            initial_leaf = collected / initial_index["calls"][path]
+            initial_original = initial_leaf.read_bytes()
+            absent = copy.deepcopy(baseline)
+            absent_run = absent["workflow_runs"][0] if "workflow_runs" in absent else absent
+            del absent_run["pull_requests"]
+            try:
+                initial_leaf.write_text(json.dumps(absent))
+                leaf.write_text(json.dumps(absent))
+                self.assertEqual({"fresh": True}, PROOF.native_fence(core, collected, fresh, REPOSITORY, "1103407173"))
+                absent_run["pull_requests"] = None
+                leaf.write_text(json.dumps(absent))
+                with self.assertRaisesRegex(ValueError, "normal-native-(freshness|generation)"):
+                    PROOF.native_fence(core, collected, fresh, REPOSITORY, "1103407173")
+            finally:
+                initial_leaf.write_bytes(initial_original)
+                leaf.write_bytes(original)
+
+    def raw_native(self, fixture, core, captured):
+        """Actual collector, raw ZIPs and actual bb1 verifier; no native claim."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw = root / "raw"
+            raw.mkdir()
+            index = {"version": 1, "repository": REPOSITORY, "calls": {}, "logs": {}, "artifacts": {}, "assets": {}}
+            responses, inventories = {}, {}
+            for entry in captured["reads"]:
+                kind, args, value = entry["kind"], entry["args"], entry["value"]
+                if kind == "call":
+                    responses[args[0]] = value
+                elif kind == "pages":
+                    path, key = args
+                    separator = "&" if "?" in path else "?"
+                    responses[f"{path}{separator}per_page=100&page=1"] = (
+                        {key: value, "total_count": len(value)} if key else value
+                    )
+                elif kind == "file":
+                    wire = base64.b64decode(value)
+                    response = {
+                        "type": "file",
+                        "path": args[1],
+                        "encoding": "base64",
+                        "size": len(wire),
+                        "sha": hashlib.sha1(
+                            b"blob " + str(len(wire)).encode() + b"\0" + wire, usedforsecurity=False
+                        ).hexdigest(),
+                        "content": value,
+                    }
+                    for revision in (args[2], fixture.content_base):
+                        responses[f"repos/{REPOSITORY}/contents/{args[1]}?ref={revision}"] = response
+                elif kind == "artifact":
+                    metadata = copy.deepcopy(value["metadata"])
+                    payload = io.BytesIO()
+                    with zipfile.ZipFile(payload, "w") as zipped:
+                        zipped.writestr(args[5], json.dumps(value["record"]))
+                    wire = payload.getvalue()
+                    metadata.update(
+                        size_in_bytes=len(wire),
+                        digest="sha256:" + hashlib.sha256(wire).hexdigest(),
+                        workflow_run={
+                            "id": args[1],
+                            "head_sha": args[3],
+                            "repository_id": 1103407173,
+                            "head_repository_id": 1103407173,
+                        },
+                    )
+                    inventories.setdefault(args[1], {})[args[4]] = metadata
+                    name = f"artifact-{metadata['id']}.zip"
+                    (raw / name).write_bytes(wire)
+                    index["artifacts"][str(metadata["id"])] = name
+            for run, inventory in inventories.items():
+                responses[f"repos/{REPOSITORY}/actions/runs/{run}/artifacts?per_page=100&page=1"] = {
+                    "artifacts": list(inventory.values()),
+                    "total_count": len(inventory),
+                }
+            for branch, revision in (("main", fixture.release), ("develop", fixture.develop)):
+                responses[f"repos/{REPOSITORY}/branches/{branch}"] = {"protected": True, "commit": {"sha": revision}}
+                responses[f"repos/{REPOSITORY}/git/ref/heads/{branch}"] = {"object": {"sha": revision}}
+            responses[f"repos/{REPOSITORY}"] = {
+                "id": 1103407173,
+                "full_name": REPOSITORY,
+                "archived": False,
+                "disabled": False,
+            }
+            responses[f"repos/{REPOSITORY}/releases?per_page=100&page=1"] = []
+            responses[f"repos/{REPOSITORY}/actions/runs/10/artifacts?per_page=100&page=1"] = {
+                "artifacts": [],
+                "total_count": 0,
+            }
+            for pull in (fixture.prep, fixture.promotion):
+                responses[f"repos/{REPOSITORY}/issues/{pull['number']}/events?per_page=100&page=1"] = []
+                inventory = responses[
+                    f"repos/{REPOSITORY}/actions/runs?head_sha={pull['head']['sha']}&per_page=100&page=1"
+                ]
+                for run in inventory["workflow_runs"]:
+                    responses[f"repos/{REPOSITORY}/actions/runs/{run['id']}"] = run
+                    responses[f"repos/{REPOSITORY}/actions/runs/{run['id']}/attempts/1"] = run
+                    responses.setdefault(f"repos/{REPOSITORY}/actions/runs/{run['id']}/approvals", [])
+            for number, (path, value) in enumerate(responses.items()):
+                name = f"read-{number}.json"
+                (raw / name).write_text(json.dumps(value))
+                index["calls"][path] = name
+            (raw / "index.json").write_text(json.dumps(index))
+            wire_index = {path: str(raw / name) for path, name in index["calls"].items()}
+            wire_index.update(
+                {
+                    f"repos/{REPOSITORY}/actions/artifacts/{identifier}/zip": str(raw / name)
+                    for identifier, name in index["artifacts"].items()
+                }
+            )
+            locator = root / "wire.json"
+            locator.write_text(json.dumps(wire_index))
+            binary = root / "bin"
+            binary.mkdir()
+            command = binary / "gh"
+            command.write_text(
+                "#!/bin/bash\nset -euo pipefail\n"
+                'test "$1 $2 $3" = "api --method GET"\n'
+                'test "$4" != "${FAIL_GH_PATH:-}"\n'
+                'cat "$(jq -er --arg path "$4" \'.[$path]\' "$WIRE_INDEX")"\n'
+            )
+            command.chmod(0o755)
+            env = fixture.git_env | {"PATH": f"{binary}:{os.environ['PATH']}", "WIRE_INDEX": str(locator)}
+            helper = ROOT / "scripts/normal_release_observations.sh"
+            collected, fresh = root / "collected", root / "fresh"
+            for mode, output in (("publication", collected), ("fresh", fresh)):
+                result = subprocess.run(  # noqa: S603 -- actual read-only collector with synthetic native I/O.
+                    ["/bin/bash", str(helper), mode, str(output), REPOSITORY, fixture.release, str(collected)],
+                    cwd=fixture.root,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(0, result.returncode, result.stderr)
+            with PROOF.native_reads(core, collected, REPOSITORY, "1103407173") as api:
+                result = PROOF.publish(
+                    fixture.root,
+                    api,
+                    core,
+                    REPOSITORY,
+                    "1103407173",
+                    fixture.release,
+                    fixture.main_base,
+                    fixture.develop,
+                )
+            self.assertEqual(fixture.release, result["main_merge"])
+            # Exercise first-time archival through the actual nested recorder,
+            # not only the verifier's non-recording publish() path.
+            archive_directory = root / "first-publication-archive"
+            with PROOF.native_reads(core, collected, REPOSITORY, "1103407173") as api:
+                archived = PROOF.publication_archive(
+                    fixture.root,
+                    api,
+                    core,
+                    REPOSITORY,
+                    "1103407173",
+                    fixture.release,
+                    fixture.main_base,
+                    fixture.develop,
+                    archive_directory,
+                )
+            self.assertFalse(archived["archive_reused"])
+            snapshot = PROOF.archive.decode((archive_directory / PROOF.archive.SNAPSHOT).read_bytes())
+            artifacts = [entry for entry in snapshot["reads"] if entry["kind"] == "artifact"]
+            self.assertEqual(3, len(artifacts))
+            self.assertTrue(all(entry["value"]["metadata"]["expired"] is False for entry in artifacts))
+            self.assertEqual({"fresh": True}, PROOF.native_fence(core, collected, fresh, REPOSITORY, "1103407173"))
+            self.association_fence(fixture, core, collected, fresh)
+            collected_index = json.loads((collected / "index.json").read_text())
+            identifier = next(iter(collected_index["artifacts"]))
+            artifact = collected / collected_index["artifacts"][identifier]
+            original = artifact.read_bytes()
+            artifact.write_bytes(original + b"changed")
+            with PROOF.native_reads(core, collected, REPOSITORY, "1103407173") as api:
+                with self.assertRaisesRegex(ValueError, "artifact-digest"):
+                    PROOF.publish(
+                        fixture.root,
+                        api,
+                        core,
+                        REPOSITORY,
+                        "1103407173",
+                        fixture.release,
+                        fixture.main_base,
+                        fixture.develop,
+                    )
+            artifact.write_bytes(original)
+            artifact.unlink()
+            with self.assertRaisesRegex(ValueError, "observation-bound"):
+                PROOF.native_snapshot(core, collected, REPOSITORY, "1103407173")
+            artifact.write_bytes(original)
+            for suffix in ("git/ref/heads/main", "pulls/2", "actions/runs/30", "actions/runs/30/approvals"):
+                with self.subTest(fresh=suffix):
+                    path = f"repos/{REPOSITORY}/{suffix}"
+                    leaf = fresh / json.loads((fresh / "index.json").read_text())["calls"][path]
+                    original = leaf.read_bytes()
+                    value = json.loads(original)
+                    if suffix.endswith("heads/main"):
+                        value["object"]["sha"] = "0" * 40
+                    elif suffix == "pulls/2":
+                        value["draft"] = True
+                    elif suffix == "actions/runs/30":
+                        value["run_attempt"] = 2
+                    else:
+                        value.clear()
+                    leaf.write_text(json.dumps(value))
+                    with self.assertRaisesRegex(ValueError, "freshness-drift"):
+                        PROOF.native_fence(core, collected, fresh, REPOSITORY, "1103407173")
+                    leaf.write_bytes(original)
+            failed = subprocess.run(  # noqa: S603 -- native transport error never creates a proof.
+                ["/bin/bash", str(helper), "publication", str(root / "failed"), REPOSITORY, fixture.release],
+                cwd=fixture.root,
+                env=env | {"FAIL_GH_PATH": f"repos/{REPOSITORY}/branches/main"},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(0, failed.returncode)
 
     def test_pinned_native_verifiers_replay_all_original_checks_without_actions_transport(self):
         directory = Path(os.environ.get("LIT_RELEASE_CONTROL_FIXTURE", ROOT / ".cache/release-control-source"))
@@ -1266,6 +1579,7 @@ class RealNativeArchiveTests(unittest.TestCase):
         self.assertEqual([(20, "control-proof-1"), (30, "control-proof-1"), (30, "control-operation-1")], downloads)
         value = PROOF.archive.decode(snapshot.read_bytes())
         snapshot.unlink()
+        self.raw_native(fixture, core, value)
         current, _develop = fixture.ordinary_main(fixture.release, fixture.develop, 1)
         expected = PROOF.archive.binding(
             REPOSITORY, "1103407173", fixture.release, fixture.main_base, fixture.develop, PROOF.CONTROL_SOURCE

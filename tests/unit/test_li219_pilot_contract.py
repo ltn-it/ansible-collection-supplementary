@@ -41,6 +41,28 @@ RETIRED = {
     "tests/unit/test_dot_github_current_revision.py",
 }
 
+DORMANT = {
+    ".github/workflows/codex-copilot-remediation.yml": (
+        "63338c28cf75b37a0082eefc57a06619c071a8643160f0ed18395e923f7ef20b"
+    ),
+    ".github/workflows/copilot-review-refresh.yml": "d0990effed093be2e9a64a1a2a9a0370d0683d8619297d28e22a759c9ed2f394",
+    ".github/workflows/review-request-continuation.yml": (
+        "9bcc9996400f8b36398b30b911f0bddd0c51b872a12024b64c7d43d318a461e6"
+    ),
+    ".github/workflows/review-event-reconcile.yml": "84da713ab5a5b895cd02defe18faa1e7517229264d24708e51eb8da2584e47d4",
+    ".github/workflows/review-infrastructure-retry.yml": (
+        "861f741f197c30805b9e8565fd085968657b8a3c3a4ada828196586fae81a6d6"
+    ),
+    ".github/workflows/renovate-guarded-automerge.yml": (
+        "2e4feed72a41171ea95ab74699542ddd0a067707dd2bca8a0e6b8683329a974a"
+    ),
+    ".github/workflows/shared-assets-guarded-automerge.yml": (
+        "8cd3c96505dd7505d472644df2dc7c14604c634099052bda8939ee316dc880be"
+    ),
+    "scripts/review-event-reconcile.py": "d1c98071362e576e578fdfa1a215ad7bfb6bb0dde473518ae3caaddbf2f3291a",
+}
+ASSETS -= DORMANT.keys()
+
 
 class PilotContractTests(unittest.TestCase):
     def test_source_adoption_receipt_is_portable_and_content_bound_in_all_manifests(self):
@@ -69,9 +91,15 @@ class PilotContractTests(unittest.TestCase):
         self.assertEqual("lightning-it/ansible-collection-supplementary", inventory["repository"])
         self.assertEqual(ASSETS, {asset["path"] for asset in inventory["assets"]})
         self.assertEqual(len(ASSETS), len(inventory["assets"]))
-        self.assertEqual(ASSETS | RETIRED, {binding["target_path"] for binding in source["bindings"]})
+        self.assertEqual(
+            ASSETS | RETIRED | (DORMANT.keys() & {b["target_path"] for b in source["bindings"]}),
+            {binding["target_path"] for binding in source["bindings"]},
+        )
         for binding in source["bindings"]:
             path = ROOT / binding["target_path"]
+            if binding["target_path"] in DORMANT:
+                self.assertFalse(path.exists())
+                continue
             if binding["target_path"] in RETIRED:
                 self.assertFalse(path.exists())
                 self.assertEqual(binding["target_sha256"], retired[binding["target_path"]]["historical_target_sha256"])
@@ -114,6 +142,10 @@ class PilotContractTests(unittest.TestCase):
         self.assertEqual("sha256:" + digest, overlay["protected_source_receipt"]["id"])
         self.assertEqual(digest, overlay["protected_source_receipt"]["sha256"])
         for row in overlay["assets"]:
+            if row["path"] in DORMANT:
+                self.assertFalse((ROOT / row["path"]).exists())
+                self.assertEqual(DORMANT[row["path"]], row["sha256"])
+                continue
             target = (ROOT / row["path"]).read_bytes()
             self.assertEqual(hashlib.sha256(target).hexdigest(), current_policy_digest(row["path"], row["sha256"]))
             if row["mode"] == "byte-identical":
@@ -173,33 +205,17 @@ class PilotContractTests(unittest.TestCase):
             self.assertEqual("read", helper["rerun-protected-verifier"]["permissions"][scope])
             self.assertEqual("write", helper["event-rerun"]["permissions"][scope])
 
-    def test_continuation_keeps_local_topology_and_narrow_permissions(self):
-        producer = yaml.safe_load((ROOT / ".github/workflows/copilot-review.yml").read_text())
-        self.assertEqual(6, len(producer["jobs"]))
-        request = producer["jobs"]["request-current-revision-review"]
-        self.assertNotIn("needs", request)
-        self.assertEqual(2, len(request["steps"]))
-        self.assertEqual(
-            {"actions": "read", "contents": "write", "issues": "write", "pull-requests": "write"},
-            request["permissions"],
-        )
-        continuation = yaml.safe_load((ROOT / ".github/workflows/review-request-continuation.yml").read_text())
-        self.assertEqual({"locate", "resume"}, set(continuation["jobs"]))
-        self.assertEqual(
-            {"actions": "write", "contents": "read", "pull-requests": "read", "issues": "read"},
-            continuation["jobs"]["locate"]["permissions"],
-        )
-        self.assertEqual(
-            {"actions": "read", "contents": "write", "pull-requests": "write", "issues": "read"},
-            continuation["jobs"]["resume"]["permissions"],
-        )
-        self.assertEqual(2, len(continuation["jobs"]["resume"]["steps"]))
-        reconcile = yaml.safe_load((ROOT / ".github/workflows/review-event-reconcile.yml").read_text())
-        self.assertEqual("read", reconcile["permissions"]["issues"])
+    def test_dormant_retirement_is_exact_source_disposition(self):
+        overlay = json.loads((ROOT / ".lit/li259-supplementary-port.json").read_text())
+        record = overlay["dormant_retirement"]
+        self.assertEqual("source-owned-retirement-disposition", record["source_status"])
+        self.assertEqual("7629452aaed2ce00cbd3809114915337613deaed", record["baseline_commit"])
+        self.assertEqual(DORMANT, {row["path"]: row["sha256"] for row in record["retired_assets"]})
+        for row in record["retired_assets"]:
+            self.assertEqual(0o644, row["mode"])
+            self.assertFalse((ROOT / row["path"]).exists())
         provenance = (ROOT / "scripts/review_request_provenance.py").read_text()
         self.assertNotIn('"--method", "POST"', provenance)
-        self.assertNotIn("def resume(", provenance)
-        self.assertNotIn("def defer(", provenance)
         self.assertNotIn("createCommitOnBranch", provenance)
 
     def test_v3_classification_and_promotion_aggregation_remain_local(self):
