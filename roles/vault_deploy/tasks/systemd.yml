@@ -10,6 +10,23 @@
     - name: Resolve Vault systemd unit for deployment
       ansible.builtin.include_tasks: resolve_systemd_unit.yml
 
+    - name: Check whether needrestart configuration is installed
+      ansible.builtin.stat:
+        path: /etc/needrestart/conf.d
+      register: vault_deploy_needrestart_config
+
+    - name: Exclude Podman kube units from needrestart automatic restarts
+      ansible.builtin.copy:
+        dest: /etc/needrestart/conf.d/50-podman-kube.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          # Managed by Ansible; Podman kube services require controlled restarts.
+          $nrconf{override_rc}->{qr(^podman-kube\@)} = 0;
+        validate: perl -c %s
+      when: vault_deploy_needrestart_config.stat.isdir | default(false)
+
     - name: Enable and start Podman kube systemd unit
       ansible.builtin.systemd:
         name: "{{ vault_deploy_systemd_unit_name_effective }}"

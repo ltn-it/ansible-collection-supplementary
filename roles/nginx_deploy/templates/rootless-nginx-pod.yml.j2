@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ nginx_deploy_pod_name | to_json }}
+spec:
+  containers:
+    - name: nginx
+      image: {{ nginx_deploy_image | to_json }}
+      ports:
+        - containerPort: 8443
+          hostPort: {{ nginx_deploy_tls_host_port }}
+          hostIP: {{ nginx_deploy_host_ip | to_json }}
+      volumeMounts:
+        - name: configuration
+          mountPath: /etc/nginx/nginx.conf
+          readOnly: true
+        - name: certificate
+          mountPath: /etc/nginx/tls/server.crt
+          readOnly: true
+        - name: private-key
+          mountPath: /etc/nginx/tls/server.key
+          readOnly: true
+  volumes:
+    - name: configuration
+      hostPath:
+        path: {{ nginx_deploy_host_conf_file | to_json }}
+        type: File
+    - name: certificate
+      hostPath:
+        path: {{ nginx_deploy_rootless_tls_cert | to_json }}
+        type: File
+    - name: private-key
+      hostPath:
+        path: {{ nginx_deploy_rootless_tls_key | to_json }}
+        type: File

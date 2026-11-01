@@ -301,13 +301,35 @@ argument_specs:
         description: Description written to the native Keycloak Quadlet unit.
         type: str
       keycloak_deploy_systemd_scope:
-        description: System systemd scope used by the native Keycloak Quadlet unit.
+        description: System scope or experimental rootless user scope for native Quadlets.
         type: str
         choices:
           - system
+          - user
       keycloak_deploy_quadlet_dir:
         description: Directory containing the native Keycloak .kube Quadlet unit.
         type: path
       keycloak_deploy_systemd_enabled:
         description: Whether the native Quadlet-generated Keycloak service is enabled.
+        type: bool
+      keycloak_deploy_rootless_user:
+        description: Prepared host account for rootless Podman.
+        type: str
+      keycloak_deploy_rootless_home:
+        description: Home of the prepared service account.
+        type: path
+      keycloak_deploy_rootless_network:
+        description: Private rootless network name.
+        type: str
+      keycloak_deploy_rootless_network_subnet:
+        description: Private rootless network subnet.
+        type: str
+      keycloak_deploy_rootless_keycloak_ip:
+        description: Keycloak address on the private network.
+        type: str
+      keycloak_deploy_rootless_postgres_ip:
+        description: PostgreSQL address on the private network.
+        type: str
+      keycloak_deploy_rootless_publish_management:
+        description: Publish management only on host loopback for local readiness checks.
         type: bool

@@ -1,0 +1,186 @@
+---
+- name: Validate rootless Keycloak configuration
+  ansible.builtin.assert:
+    that:
+      - keycloak_deploy_systemd_scope == 'user'
+      - keycloak_deploy_env_extra | length == 0
+      - keycloak_deploy_postgres_systemd_unit_name == keycloak_deploy_postgres_pod_name ~ '-pod'
+      - keycloak_deploy_start_command == 'start'
+      - keycloak_deploy_extra_start_args | length == 0
+      - keycloak_deploy_http_relative_path == ''
+      - keycloak_deploy_db_vendor == 'postgres'
+      - keycloak_deploy_db_port | int == 5432
+      - keycloak_deploy_postgres_container_port | int == 5432
+      - keycloak_deploy_container_data_dir == '/opt/keycloak/data'
+      - keycloak_deploy_container_postgres_data_dir == '/var/lib/postgresql/data'
+      - not keycloak_deploy_host_network | bool
+      - not keycloak_deploy_postgres_host_network | bool
+      - not keycloak_deploy_native_network_migration | bool
+      - >-
+        keycloak_deploy_rootless_network_subnet | lit.supplementary.rootless_network_valid(
+          [keycloak_deploy_rootless_keycloak_ip, keycloak_deploy_rootless_postgres_ip])
+      - keycloak_deploy_manage_postgres | bool
+      - keycloak_deploy_hostname is match('^https://[A-Za-z0-9.-]+(:[0-9]+)?/?$')
+      - keycloak_deploy_db_name is match('^[A-Za-z0-9_]+$')
+      - keycloak_deploy_db_user is match('^[A-Za-z0-9_]+$')
+      - keycloak_deploy_admin_user is match('^[A-Za-z0-9_.@-]+$')
+      - keycloak_deploy_manage_systemd | bool
+      - keycloak_deploy_systemd_enabled | bool
+      - keycloak_deploy_proxy_headers == 'xforwarded'
+      - keycloak_deploy_proxy_trusted_addresses | length > 0
+      - not keycloak_deploy_generate_secrets | bool
+      - not keycloak_deploy_store_generated_secrets | bool
+      - keycloak_deploy_db_password | length >= 16
+      - keycloak_deploy_admin_password | length >= 16
+      - keycloak_deploy_admin_password is not search('[\r\n]')
+      - keycloak_deploy_db_password is not search('[\r\n]')
+      - keycloak_deploy_rootless_user != 'root'
+      - keycloak_deploy_rootless_home is match('^/')
+      - keycloak_deploy_host_data_dir is match('^/')
+      - keycloak_deploy_postgres_data_dir is match('^/')
+      - keycloak_deploy_rootless_network is match('^[A-Za-z0-9][A-Za-z0-9_.-]*$')
+      - keycloak_deploy_run_user_uid | int > 0
+      - keycloak_deploy_port | int == 8080
+      - keycloak_deploy_management_port | int > 0
+      - keycloak_deploy_management_port | int <= 65535
+    quiet: true
+  no_log: true
+  tags: always
+
+- name: Resolve the prepared rootless account
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ keycloak_deploy_rootless_user }}"
+  tags: always
+
+- name: Record rootless runtime directory
+  ansible.builtin.set_fact:
+    keycloak_deploy_rootless_uid: "{{ ansible_facts.getent_passwd[keycloak_deploy_rootless_user][1] }}"
+    keycloak_deploy_rootless_quadlet_dir: "{{ keycloak_deploy_rootless_home }}/.config/containers/systemd"
+  tags: always
+
+- name: Verify prepared persistent directories
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ keycloak_deploy_host_data_dir }}"
+    - "{{ keycloak_deploy_postgres_data_dir }}"
+    - "{{ keycloak_deploy_config_dir }}"
+  register: keycloak_deploy_rootless_paths
+
+- name: Require host preparation before rootless deployment
+  ansible.builtin.assert:
+    that:
+      - item.stat.isdir | default(false)
+    fail_msg: Prepare the service account and persistent paths before deployment.
+  loop: "{{ keycloak_deploy_rootless_paths.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Require a genuinely unprivileged runtime account
+  ansible.builtin.assert:
+    that: keycloak_deploy_rootless_uid | int > 0
+    quiet: true
+
+- name: Locate incompatible legacy rootless container units
+  ansible.builtin.stat:
+    path: "{{ keycloak_deploy_rootless_quadlet_dir }}/{{ item }}.container"
+  loop: [keycloak, postgres]
+  register: keycloak_deploy_rootless_legacy
+
+- name: Require an exclusive kube lifecycle owner
+  ansible.builtin.assert:
+    that: not item.stat.exists
+    fail_msg: Existing experimental container units require a separately planned transition before kube deployment.
+  loop: "{{ keycloak_deploy_rootless_legacy.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Deploy rootless services through the shared kube lifecycle
+  become: true
+  become_user: "{{ keycloak_deploy_rootless_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ keycloak_deploy_rootless_uid }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ keycloak_deploy_rootless_uid }}/bus"
+  when:
+    - not keycloak_deploy_skip_runtime | bool
+    - not keycloak_deploy_skip_deploy | bool
+  block:
+    - name: Require an available rootless user manager
+      ansible.builtin.command:
+        argv: [systemctl, --user, show-environment]
+      changed_when: false
+      no_log: true
+
+    - name: Determine whether the private rootless network already exists
+      ansible.builtin.command:
+        argv: [podman, network, exists, "{{ keycloak_deploy_rootless_network }}"]
+      register: keycloak_deploy_rootless_network_exists
+      changed_when: false
+      failed_when: keycloak_deploy_rootless_network_exists.rc not in [0, 1]
+      check_mode: false
+
+    - name: Inspect the existing private rootless network
+      ansible.builtin.command:
+        argv: [podman, network, inspect, "{{ keycloak_deploy_rootless_network }}"]
+      register: keycloak_deploy_rootless_existing_network
+      changed_when: false
+      check_mode: false
+      when: keycloak_deploy_rootless_network_exists.rc == 0
+      no_log: true
+
+    - name: Require the existing private subnet to match the declared subnet
+      ansible.builtin.assert:
+        that:
+          - (keycloak_deploy_rootless_existing_network.stdout | from_json) | length == 1
+          - >-
+            ((keycloak_deploy_rootless_existing_network.stdout | from_json)[0].subnets
+             | map(attribute='subnet') | list) == [keycloak_deploy_rootless_network_subnet]
+        fail_msg: >-
+          The existing private Podman network has a different subnet.
+          Plan a coordinated migration before changing the declared network.
+        quiet: true
+      when: keycloak_deploy_rootless_network_exists.rc == 0
+
+    - name: Create private Quadlet configuration directory
+      ansible.builtin.file:
+        path: "{{ keycloak_deploy_rootless_quadlet_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Render the private network definition
+      ansible.builtin.template:
+        src: rootless-keycloak-private.network.j2
+        dest: "{{ keycloak_deploy_rootless_quadlet_dir }}/{{ keycloak_deploy_rootless_network }}.network"
+        mode: '0600'
+      when: not ansible_check_mode
+
+    - name: Render manifests and retain pending work after any managed-file repair
+      block:
+        - name: Render private PostgreSQL and Keycloak Kubernetes manifests
+          ansible.builtin.template:
+            src: "rootless-{{ item }}-pod.yml.j2"
+            dest: "{{ keycloak_deploy_config_dir }}/{{ item }}-rootless-pod.yml"
+            mode: '0600'
+          loop: [postgres, keycloak]
+          register: keycloak_deploy_rootless_rendered_manifests
+          no_log: true
+          diff: false
+      always:
+        - name: Invalidate applied identities for repaired Kubernetes manifests
+          ansible.builtin.file:
+            path: "{{ keycloak_deploy_config_dir }}/.{{ item.item }}-last-applied"
+            state: absent
+          loop: >-
+            {{ keycloak_deploy_rootless_rendered_manifests.results | default([])
+               | selectattr('changed', 'defined') | selectattr('changed') | list }}
+          no_log: true
+          when: not ansible_check_mode
+
+    - name: Reconcile the managed PostgreSQL kube runtime
+      ansible.builtin.include_tasks: rootless-postgres.yml
+      when: not ansible_check_mode
+
+    - name: Reconcile the Keycloak kube runtime
+      ansible.builtin.include_tasks: rootless-keycloak.yml
+      when: not ansible_check_mode

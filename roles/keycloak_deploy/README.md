@@ -112,6 +112,41 @@ Both verify the active database endpoint before health acceptance. Quadlet
 takeover disables only the exact legacy unit; its `<pod-name>-pod.service` name
 avoids `keycloak.service` collisions. Missing systemd fails prechecks.
 
+### Rootless user scope (experimental)
+
+Set `keycloak_deploy_systemd_scope: user` explicitly to use native User Quadlets.
+All three runtimes are rendered as Kubernetes YAML and owned exclusively by
+`lit.foundational.podman_systemd` through `.kube` units. The caller supplies
+Podman, a genuinely non-root account and home, automatic user-systemd startup,
+writable persistent directories, TLS material and privileged-port permission.
+This path does not prepare the operating system. On SELinux-enforcing hosts,
+prepared bind paths must have `container_file_t` labels: existing bind mounts
+are not relabeled by [Podman kube play](https://docs.podman.io/en/stable/markdown/podman-kube-play.1.html).
+
+Credentials come from encrypted caller inputs and appear only in owner-readable
+runtime manifests rendered with `no_log` and disabled diffs. PostgreSQL credentials
+must continue to match an existing database. No database migration or downgrade
+is implied. Old experimental `.container` units are rejected rather than silently
+creating a second lifecycle owner.
+
+The private network name and addresses are configurable. PostgreSQL and the
+Keycloak application endpoint have no host publication; optional management uses
+the configured host port on loopback, with container port 9000. Keycloak maps the
+host account to its configured image UID through Podman's keep-id annotation.
+Only xforwarded proxy headers are currently supported.
+
+Nginx candidates are validated on the actual private network before installation.
+The last successfully applied configuration, manifest and TLS checksums decide
+whether the shared lifecycle must recreate the runtime. Failed validation retains
+the prior installed configuration; failed reconciliation retains pending state.
+Same-path TLS renewal is detected by content and recreates the bind mounts.
+`nginx_deploy_rootless_after` defines user-unit boot ordering for the edge.
+Check mode predicts manifests/configuration but does not reconcile services.
+
+Existing system-scope platform/profile claims do not establish rootless production
+support. Rootless remains experimental; the caller owns PKI, trust and backup/
+restore planning. Container names follow Podman's kube pod/container naming.
+
 ## Dependencies
 
 Runtime composition uses `lit.supplementary.postgres_deploy` when PostgreSQL is
@@ -172,3 +207,13 @@ Lightning IT
 Run the three scenarios documented in
 [`docs/testing/keycloak.md`](../../docs/testing/keycloak.md). No external service
 credential is required; use ephemeral test credentials only.
+
+Existing rootless networks must match the declared subnet exactly. The role
+inspects that network before writing managed files and rejects a live subnet
+change. A coordinated network migration is outside this experimental path.
+
+The experimental user-scope path requires a canonical IPv4 network with distinct usable static member addresses and rejects nonempty `keycloak_deploy_env_extra`; additional environment settings are not silently ignored.
+
+User scope supports the standard `start` command, no extra startup arguments and the root context path. Non-default startup, database vendor/port, container mount paths, host networking or native migration settings are rejected before managed writes. Its derived API URL uses the configured HTTPS hostname; an explicit API URL still takes precedence. System-scope URL derivation is unchanged.
+
+User scope requires the PostgreSQL service name derived from its pod (`<postgres-pod>-pod`). Unsupported `keycloak_deploy_postgres_systemd_unit_name` overrides are rejected before managed writes, preserving the shared lifecycle owner and Keycloak dependencies. Renaming an existing stateful service requires a separate planned transition.

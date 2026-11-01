@@ -164,7 +164,7 @@ jobs:
           private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
-          permission-actions: write
+          permission-actions: read
           permission-contents: write
           permission-pull-requests: write
 
@@ -676,14 +676,7 @@ jobs:
               and .head.sha == $sha
               and .base.ref == "develop"
             ' <<<"$owned_pull" >/dev/null
-          gh workflow run release-bot-exact-head-review.yml \
-            -f bounded_mode=single \
-            --repo "$REPO" \
-            --ref "$(jq -r .base.ref <<<"$owned_pull")" \
-            -f "pr_number=${existing}" \
-            -f "base_ref=$(jq -r .base.ref <<<"$owned_pull")" \
-            -f "expected_base=$(jq -r .base.sha <<<"$owned_pull")" \
-            -f "expected_head=$(jq -r .head.sha <<<"$owned_pull")"
+          echo 'Native common control evaluates the Release App PR event.'
 
           if [ "$SECURITY_RELEASE" = true ]; then
             test "$(jq -er '.[0].user.login' <<< "$owned_pulls")" = \
@@ -891,7 +884,7 @@ jobs:
           private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
-          permission-actions: write
+          permission-actions: read
           permission-contents: read
           permission-pull-requests: write
 
@@ -1010,11 +1003,4 @@ jobs:
               and .base.ref == "develop"
               and .base.sha == $base
             ' <<<"$ready_pull" >/dev/null
-          gh workflow run release-bot-exact-head-review.yml \
-            -f bounded_mode=single \
-            --repo "$REPOSITORY" \
-            --ref develop \
-            -f "pr_number=${recovery_pr}" \
-            -f base_ref=develop \
-            -f "expected_base=${EXPECTED_BASE}" \
-            -f "expected_head=${EXPECTED_HEAD}"
+          echo 'Native common control evaluates the Release App PR event.'

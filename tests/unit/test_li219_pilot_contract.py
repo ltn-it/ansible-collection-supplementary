@@ -8,6 +8,18 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def current_policy_digest(path, historical_digest):
+    updates = json.loads((ROOT / ".lit/li319-central-verifier-retirement.json").read_text())["policy_updates"]
+    matches = [row for row in updates if row["path"] == path]
+    if not matches:
+        return historical_digest
+    if len(matches) != 1 or matches[0]["previous_sha256"] != historical_digest:
+        raise AssertionError("Policy update must bind one exact historical predecessor")
+    return matches[0]["sha256"]
+
+
 ASSETS = {
     ".github/workflows/review-infrastructure-retry.yml",
     "scripts/native_verifier_retry.py",
@@ -73,7 +85,7 @@ class PilotContractTests(unittest.TestCase):
                 # a separate, exact protected-main overlay for changed assets.
                 successor = overlay_assets[binding["target_path"]]
                 self.assertEqual(overlay["protected_source_commit"], "5b70bdaa4eaa9b0121545cb842eca8b3256e9cc3")
-                self.assertEqual(successor["sha256"], digest)
+                self.assertEqual(current_policy_digest(binding["target_path"], successor["sha256"]), digest)
                 self.assertEqual(
                     "central-managed" if successor["mode"] == "byte-identical" else "local-required",
                     asset["category"],
@@ -103,7 +115,7 @@ class PilotContractTests(unittest.TestCase):
         self.assertEqual(digest, overlay["protected_source_receipt"]["sha256"])
         for row in overlay["assets"]:
             target = (ROOT / row["path"]).read_bytes()
-            self.assertEqual(hashlib.sha256(target).hexdigest(), row["sha256"])
+            self.assertEqual(hashlib.sha256(target).hexdigest(), current_policy_digest(row["path"], row["sha256"]))
             if row["mode"] == "byte-identical":
                 self.assertEqual(row["source_sha256"], row["sha256"])
 

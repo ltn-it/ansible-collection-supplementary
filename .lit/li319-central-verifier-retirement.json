@@ -58,6 +58,12 @@
       "path": ".github/copilot-instructions.md",
       "previous_sha256": "7c2310c57395ab32eba2c34bd40bce67c7a06eff1a94ceca3109f1165b4cb270",
       "sha256": "4b098925cac2ca9387e0379a9701e0b97282c22bd14ea1d8eef9e69fd86dad56"
+    },
+    {
+      "path": ".github/workflows/current-revision-rerun.yml",
+      "previous_sha256": "25013246f828c79fb35486b1aa373ac537d28adeab5162fde76bc7e8208891e4",
+      "sha256": "41e3287258e538ea60f3efea3f84ad0272441eb0e29a3d066b58c73ed7b4de16",
+      "reason": "Repository-local jq 1.8 compatibility: bind the exact job count before boolean validation; historical source receipts are preserved."
     }
   ]
 }

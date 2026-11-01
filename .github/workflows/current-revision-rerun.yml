@@ -821,9 +821,9 @@ jobs:
               --argjson id "${producer_id}" \
               --argjson attempt "${EVENT_PRODUCER_RUN_ATTEMPT}" '
               def integer: type == "number" and floor == .;
-              type == "array" and length > 0
-              and ([.[].jobs[]] | length) as $count
-              | all(.[]; (.jobs | type) == "array"
+              ([.[].jobs[]] | length) as $count
+              | type == "array" and length > 0
+              and all(.[]; (.jobs | type) == "array"
                   and (.total_count | integer) and .total_count == $count)
               and ([.[].jobs[].id] | unique | length) == $count
               and all(.[].jobs[];

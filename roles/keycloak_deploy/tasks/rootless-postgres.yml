@@ -1,0 +1,77 @@
+---
+- name: Read the desired postgres manifest identity
+  ansible.builtin.stat:
+    path: "{{ keycloak_deploy_config_dir }}/postgres-rootless-pod.yml"
+    checksum_algorithm: sha256
+  register: keycloak_deploy_rootless_postgres_manifest
+  no_log: true
+
+- name: Locate the last applied postgres identity
+  ansible.builtin.stat:
+    path: "{{ keycloak_deploy_config_dir }}/.postgres-last-applied"
+  register: keycloak_deploy_rootless_postgres_state
+  no_log: true
+
+- name: Read the last applied postgres identity
+  ansible.builtin.slurp:
+    src: "{{ keycloak_deploy_config_dir }}/.postgres-last-applied"
+  register: keycloak_deploy_rootless_postgres_applied
+  when: keycloak_deploy_rootless_postgres_state.stat.exists
+  no_log: true
+
+- name: Mark the postgres generation pending before runtime replacement
+  ansible.builtin.file:
+    path: "{{ keycloak_deploy_config_dir }}/.postgres-last-applied"
+    state: absent
+  when: >-
+    (keycloak_deploy_rootless_postgres_applied.content | default('') | b64decode | trim)
+    != keycloak_deploy_rootless_postgres_manifest.stat.checksum
+  no_log: true
+
+- name: Reconcile postgres exclusively through shared User Quadlets
+  ansible.builtin.include_role:
+    name: lit.foundational.podman_systemd
+  vars:
+    podman_systemd_action: >-
+      {{ 'started'
+          if ((keycloak_deploy_rootless_postgres_applied.content | default('') | b64decode | trim)
+              == keycloak_deploy_rootless_postgres_manifest.stat.checksum)
+          else 'restarted' }}
+    podman_systemd_unit_name: "{{ keycloak_deploy_postgres_pod_name }}-pod"
+    podman_systemd_description: "Rootless postgres"
+    podman_systemd_manifest_path: "{{ keycloak_deploy_config_dir }}/postgres-rootless-pod.yml"
+    podman_systemd_scope: user
+    podman_systemd_quadlet_dir: "{{ keycloak_deploy_rootless_quadlet_dir }}"
+    podman_systemd_install_wanted_by: default.target
+    podman_systemd_enabled: true
+    podman_systemd_networks:
+      - "{{ keycloak_deploy_rootless_network }}.network:ip={{ keycloak_deploy_rootless_postgres_ip }}"
+    podman_systemd_after: [network-online.target]
+    podman_systemd_wants: [network-online.target]
+
+- name: Wait for the final PostgreSQL TCP listener
+  ansible.builtin.command:
+    argv:
+      - podman
+      - exec
+      - "{{ keycloak_deploy_postgres_pod_name }}-{{ keycloak_deploy_postgres_container_name }}"
+      - pg_isready
+      - -h
+      - 127.0.0.1
+      - -U
+      - "{{ keycloak_deploy_db_user }}"
+      - -d
+      - "{{ keycloak_deploy_db_name }}"
+  register: keycloak_deploy_rootless_postgres_ready
+  until: keycloak_deploy_rootless_postgres_ready.rc == 0
+  retries: 60
+  delay: 2
+  changed_when: false
+
+- name: Record the successfully applied postgres identity
+  ansible.builtin.copy:
+    content: "{{ keycloak_deploy_rootless_postgres_manifest.stat.checksum }}\n"
+    dest: "{{ keycloak_deploy_config_dir }}/.postgres-last-applied"
+    mode: '0600'
+  no_log: true
+  diff: false

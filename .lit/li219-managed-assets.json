@@ -12,7 +12,7 @@
     {
       "path": ".github/workflows/current-revision-rerun.yml",
       "category": "local-required",
-      "sha256": "25013246f828c79fb35486b1aa373ac537d28adeab5162fde76bc7e8208891e4",
+      "sha256": "41e3287258e538ea60f3efea3f84ad0272441eb0e29a3d066b58c73ed7b4de16",
       "source": "shared-assets-lit/default/.github/workflows/current-revision-rerun.yml",
       "owner": "ansible-collection-supplementary",
       "purpose": "Local Required-title label-action compatibility; authenticated labeled/unlabeled locator filters match the protected Required trigger and consumer allowlists."

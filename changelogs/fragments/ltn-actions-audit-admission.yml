@@ -1,0 +1,8 @@
+---
+bugfixes:
+  - >-
+    Gate protected-main release evidence Environment access on successful mandatory aggregates
+    and exact current-run artifacts.
+minor_changes:
+  - >-
+    Bound Scorecard scan and SARIF upload jobs to 60 and 10 minutes and remove unreachable CI compatibility aliases.

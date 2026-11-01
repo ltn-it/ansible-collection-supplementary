@@ -1020,6 +1020,10 @@ roles:
     external_dependencies: []
     known_limitations:
       - >-
+        User-scope rootless Quadlets are experimental and require a prepared
+        non-root account, persistent paths, user manager and edge TLS. System-scope
+        profile evidence does not establish rootless platform support.
+      - >-
         Default-off coupled native network migration remains experimental until
         live paired rollback, DNS isolation and restart acceptance pass on the
         exact candidate. Fault-injected unit control-flow tests do not establish
@@ -1498,6 +1502,9 @@ roles:
       - "lit.foundational.podman_systemd"
     external_dependencies: []
     known_limitations:
+      - >-
+        The explicit rootless TLS edge path is experimental and requires caller-owned
+        host preparation and PKI; no system-scope support claim applies to that path.
       - "Current root scenario is a syntax stub."
     deprecation_state: "active"
     scenario_support:

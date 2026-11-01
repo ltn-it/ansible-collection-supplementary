@@ -40,6 +40,22 @@ must fail closed.
 
 ## Validation lanes
 
+The repository-owned readers accept the protected Supplementary control-policy
+schemas 1 and 2. Schema 2 may retain the exact consumed/uncertain funding
+contract installed by the separate governed genesis operation; reading that
+contract grants no request, source admission or review acceptance. The Security
+producer selector still only withdraws legacy funding and requires independent
+central producer admission.
+
+Normal release verification keeps its immutable `bb1a5df9` native proof reader.
+Only its policy parser receives a private schema-1 projection; the recorded and
+signed native observation retains the actual policy bytes, and the resulting
+configuration retains the actual schema and repository label. The immutable
+reader still owns source-lineage validation and every native proof/approval
+check. Its normal-release path rejects a Security producer-only selector, which
+this historical reader cannot authenticate. No policy projection is published
+as native evidence and no existing signed observation is rewritten.
+
 Collection source pull requests require the stable `Collection / Fast` aggregate
 for the Fast Lane. It covers lint/sanity, build/install, role coverage, and only
 the registry-selected Tiny profiles. A Keycloak-only change therefore does not

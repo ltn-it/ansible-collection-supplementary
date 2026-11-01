@@ -1302,9 +1302,16 @@ class WorkflowCouplingTests(unittest.TestCase):
         self.assertEqual("aa45941e2d24194f29f480306bff39d27d7b4824", manifest["core_candidate"])
         self.assertEqual("5b70bdaa4eaa9b0121545cb842eca8b3256e9cc3", manifest["protected_source_commit"])
         self.assertEqual("disabled-until-native-acceptance", manifest["activation"])
+        retirement = json.loads((ROOT / ".lit/li319-central-verifier-retirement.json").read_text())
+        policies = {row["path"]: row for row in retirement["policy_updates"]}
         for row in manifest["assets"]:
             content = (ROOT / row["path"]).read_bytes()
-            self.assertEqual(row["sha256"], hashlib.sha256(content).hexdigest(), row["path"])
+            expected = row["sha256"]
+            if row["path"] in policies:
+                update = policies[row["path"]]
+                self.assertEqual(expected, update["previous_sha256"])
+                expected = update["sha256"]
+            self.assertEqual(expected, hashlib.sha256(content).hexdigest(), row["path"])
             if row["mode"] == "byte-identical":
                 self.assertEqual(
                     row["source_blob"],

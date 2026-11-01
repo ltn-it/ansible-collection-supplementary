@@ -97,3 +97,15 @@ nginx_deploy_skip_runtime: false
 nginx_deploy_skip_deploy: false
 nginx_deploy_skip_config: false
 nginx_deploy_skip_validate: false
+
+# Experimental rootless edge proxy; host preparation and PKI are external.
+nginx_deploy_rootless_user: container
+nginx_deploy_rootless_home: /home/container
+nginx_deploy_rootless_network: keycloak-private
+nginx_deploy_rootless_ip: 10.89.50.30
+nginx_deploy_rootless_upstream: http://10.89.50.10:8080
+nginx_deploy_rootless_tls_cert: ""
+nginx_deploy_rootless_tls_key: ""
+nginx_deploy_rootless_after:
+  - network-online.target
+  - keycloak-pod.service

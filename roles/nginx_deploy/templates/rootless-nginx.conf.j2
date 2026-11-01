@@ -1,0 +1,29 @@
+worker_processes auto;
+events { worker_connections 1024; }
+http {
+    include /etc/nginx/mime.types;
+    access_log /dev/stdout;
+    error_log /dev/stderr warn;
+    server_tokens off;
+    server {
+        listen 8443 ssl;
+        server_name {{ nginx_deploy_server_name }};
+        ssl_certificate /etc/nginx/tls/server.crt;
+        ssl_certificate_key /etc/nginx/tls/server.key;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        location /health { return 404; }
+        location /metrics { return 404; }
+        location / {
+            proxy_pass {{ nginx_deploy_rootless_upstream }};
+            proxy_set_header Host $server_name;
+            proxy_set_header X-Forwarded-Host $server_name;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Forwarded-Port {{ nginx_deploy_tls_host_port }};
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $remote_addr;
+            proxy_set_header X-Forwarded-Prefix "";
+            proxy_set_header X-Original-Forwarded-For "";
+            proxy_set_header Forwarded "";
+        }
+    }
+}

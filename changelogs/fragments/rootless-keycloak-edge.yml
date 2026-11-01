@@ -1,0 +1,12 @@
+---
+minor_changes:
+  - >-
+    keycloak_deploy - add explicit user-scope Quadlets for Keycloak and managed
+    PostgreSQL on a prepared rootless host.
+  - >-
+    nginx_deploy - add an explicit rootless TLS edge proxy with private upstream
+    and host-loopback management isolation.
+known_issues:
+  - >-
+    Rootless user-scope deployment remains experimental; existing system-scope
+    support and candidate platform boundaries remain unchanged.

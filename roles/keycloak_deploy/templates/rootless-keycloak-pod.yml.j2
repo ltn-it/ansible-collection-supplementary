@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ keycloak_deploy_pod_name | to_json }}
+  annotations:
+    io.podman.annotations.userns: >-
+      keep-id:uid={{ keycloak_deploy_run_user_uid }},gid={{ keycloak_deploy_run_user_gid }}
+spec:
+  containers:
+    - name: {{ keycloak_deploy_container_name | to_json }}
+      image: {{ keycloak_deploy_image | to_json }}
+      command: [/opt/keycloak/bin/kc.sh]
+      args: [start]
+      securityContext:
+        runAsUser: {{ keycloak_deploy_run_user_uid | int }}
+        runAsGroup: {{ keycloak_deploy_run_user_gid | int }}
+        runAsNonRoot: true
+{% if keycloak_deploy_rootless_publish_management | bool %}
+      ports:
+        - containerPort: 9000
+          hostPort: {{ keycloak_deploy_management_port }}
+          hostIP: 127.0.0.1
+{% endif %}
+      env:
+        - name: KC_DB
+          value: {{ ('postgres') | string | to_json }}
+        - name: KC_DB_URL_HOST
+          value: {{ (keycloak_deploy_rootless_postgres_ip) | string | to_json }}
+        - name: KC_DB_URL_PORT
+          value: {{ ('5432') | string | to_json }}
+        - name: KC_DB_URL_DATABASE
+          value: {{ (keycloak_deploy_db_name) | string | to_json }}
+        - name: KC_DB_USERNAME
+          value: {{ (keycloak_deploy_db_user) | string | to_json }}
+        - name: KC_DB_PASSWORD
+          value: {{ (keycloak_deploy_db_password) | string | to_json }}
+        - name: KC_BOOTSTRAP_ADMIN_USERNAME
+          value: {{ (keycloak_deploy_admin_user) | string | to_json }}
+        - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+          value: {{ (keycloak_deploy_admin_password) | string | to_json }}
+        - name: KC_HTTP_ENABLED
+          value: {{ ('true') | string | to_json }}
+        - name: KC_HTTP_PORT
+          value: {{ ('8080') | string | to_json }}
+        - name: KC_HEALTH_ENABLED
+          value: {{ ('true') | string | to_json }}
+        - name: KC_METRICS_ENABLED
+          value: {{ ('true') | string | to_json }}
+        - name: KC_HOSTNAME
+          value: {{ (keycloak_deploy_hostname) | string | to_json }}
+        - name: KC_PROXY_HEADERS
+          value: {{ (keycloak_deploy_proxy_headers) | string | to_json }}
+        - name: KC_PROXY_TRUSTED_ADDRESSES
+          value: {{ (keycloak_deploy_proxy_trusted_addresses | join(',')) | string | to_json }}
+      volumeMounts:
+        - name: keycloak-data
+          mountPath: /opt/keycloak/data
+  volumes:
+    - name: keycloak-data
+      hostPath:
+        path: {{ keycloak_deploy_host_data_dir | to_json }}
+        type: Directory

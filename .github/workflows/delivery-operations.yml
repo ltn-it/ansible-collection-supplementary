@@ -19,4 +19,4 @@ jobs:
       contents: read
       actions: write
       pull-requests: read
-    uses: lightning-it/.github/.github/workflows/delivery-operations.yml@eb56592da1208b10f4570f1f171fab12a4e53823
+    uses: ltn-it/.github/.github/workflows/delivery-operations.yml@530b8fb175b7fccf238b03aab652bd5ee2ad2a41

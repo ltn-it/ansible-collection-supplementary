@@ -660,7 +660,7 @@ exit 0
             with self.subTest(role=role):
                 self.assertIn("ansible_facts.get('service_mgr', '')", assertions)
 
-    def test_managed_quadlet_interfaces_reject_injection_and_user_scope(self) -> None:
+    def test_system_quadlet_interfaces_reject_injection(self) -> None:
         for role in ("keycloak_deploy", "postgres_deploy"):
             tasks = yaml.safe_load((ROOT / "roles" / role / "tasks" / "assert.yml").read_text(encoding="utf-8"))
             contract = "\n".join(tasks[0]["ansible.builtin.assert"]["that"])
@@ -674,7 +674,7 @@ exit 0
                 self.assertIn(f"{prefix}_quadlet_dir == '/etc/containers/systemd'", contract)
 
         keycloak_options = self._role_options("keycloak_deploy")
-        self.assertEqual(keycloak_options["keycloak_deploy_systemd_scope"]["choices"], ["system"])
+        self.assertEqual(keycloak_options["keycloak_deploy_systemd_scope"]["choices"], ["system", "user"])
 
     def test_quadlet_networks_use_exact_grammar_and_ipv4_validation(self) -> None:
         for role, variable in (

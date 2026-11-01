@@ -1,0 +1,68 @@
+---
+- name: Validate rootless Nginx configuration
+  ansible.builtin.assert:
+    that:
+      - nginx_deploy_rootless_user != 'root'
+      - not nginx_deploy_skip_config | bool
+      - not nginx_deploy_skip_validate | bool
+      - nginx_deploy_config_test | bool
+      - nginx_deploy_manage_default_site | bool
+      - nginx_deploy_default_server_extra_directives | length == 0
+      - nginx_deploy_http_extra_directives | length == 0
+      - nginx_deploy_server_name is match('^[A-Za-z0-9.-]+$')
+      - nginx_deploy_rootless_upstream is match('^http://[A-Za-z0-9.:-]+$')
+      - nginx_deploy_manage_systemd | bool
+      - nginx_deploy_systemd_enabled | bool
+      - nginx_deploy_rootless_tls_cert is match('^/')
+      - nginx_deploy_rootless_tls_key is match('^/')
+    quiet: true
+  tags: always
+
+- name: Resolve prepared Nginx service account
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ nginx_deploy_rootless_user }}"
+  tags: always
+
+- name: Require an unprivileged Nginx runtime account
+  ansible.builtin.assert:
+    that: ansible_facts.getent_passwd[nginx_deploy_rootless_user][1] | int > 0
+    quiet: true
+
+- name: Locate an incompatible legacy Nginx container unit
+  ansible.builtin.stat:
+    path: "{{ nginx_deploy_rootless_home }}/.config/containers/systemd/nginx.container"
+  register: nginx_deploy_rootless_legacy
+
+- name: Require exclusive kube ownership of Nginx
+  ansible.builtin.assert:
+    that: not nginx_deploy_rootless_legacy.stat.exists
+    fail_msg: Existing experimental container units require a separately planned transition before kube deployment.
+
+- name: Deploy Nginx through the shared User Quadlet lifecycle
+  become: true
+  become_user: "{{ nginx_deploy_rootless_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.getent_passwd[nginx_deploy_rootless_user][1] }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ ansible_facts.getent_passwd[nginx_deploy_rootless_user][1] }}/bus"
+  when:
+    - not nginx_deploy_skip_runtime | bool
+    - not nginx_deploy_skip_deploy | bool
+  block:
+    - name: Predict reverse proxy configuration changes
+      ansible.builtin.template:
+        src: rootless-nginx.conf.j2
+        dest: "{{ nginx_deploy_host_conf_file }}"
+        mode: '0640'
+      when: ansible_check_mode
+
+    - name: Predict Kubernetes manifest changes
+      ansible.builtin.template:
+        src: rootless-nginx-pod.yml.j2
+        dest: "{{ nginx_deploy_host_conf_file | dirname }}/nginx-rootless-pod.yml"
+        mode: '0600'
+      when: ansible_check_mode
+
+    - name: Validate and reconcile the actual reverse proxy runtime
+      ansible.builtin.include_tasks: rootless-reconcile.yml
+      when: not ansible_check_mode

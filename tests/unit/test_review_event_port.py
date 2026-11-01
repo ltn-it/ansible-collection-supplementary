@@ -82,6 +82,9 @@ class EventPortTests(unittest.TestCase):
 
     def test_event_producer_attempt_and_complete_terminal_inventory(self):
         function = shell_function(ROOT / ".github/workflows/current-revision-rerun.yml", "validate_event_producer")
+        # Bind the count before boolean checks: jq 1.8 changes the ambiguous
+        # `predicate and generator as $count` evaluation used by older jq.
+        self.assertIn('([.[].jobs[]] | length) as $count\n    | type == "array"', function)
         for attempt in (1, 2):
             for conclusion in ("success", "failure"):
                 producer = {

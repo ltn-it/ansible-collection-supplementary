@@ -1,0 +1,94 @@
+---
+- name: Read the desired keycloak manifest identity
+  ansible.builtin.stat:
+    path: "{{ keycloak_deploy_config_dir }}/keycloak-rootless-pod.yml"
+    checksum_algorithm: sha256
+  register: keycloak_deploy_rootless_keycloak_manifest
+  no_log: true
+
+- name: Locate the last applied keycloak identity
+  ansible.builtin.stat:
+    path: "{{ keycloak_deploy_config_dir }}/.keycloak-last-applied"
+  register: keycloak_deploy_rootless_keycloak_state
+  no_log: true
+
+- name: Read the last applied keycloak identity
+  ansible.builtin.slurp:
+    src: "{{ keycloak_deploy_config_dir }}/.keycloak-last-applied"
+  register: keycloak_deploy_rootless_keycloak_applied
+  when: keycloak_deploy_rootless_keycloak_state.stat.exists
+  no_log: true
+
+- name: Mark the keycloak generation pending before runtime replacement
+  ansible.builtin.file:
+    path: "{{ keycloak_deploy_config_dir }}/.keycloak-last-applied"
+    state: absent
+  when: >-
+    (keycloak_deploy_rootless_keycloak_applied.content | default('') | b64decode | trim)
+    != keycloak_deploy_rootless_keycloak_manifest.stat.checksum
+  no_log: true
+
+- name: Reconcile keycloak exclusively through shared User Quadlets
+  ansible.builtin.include_role:
+    name: lit.foundational.podman_systemd
+  vars:
+    podman_systemd_action: >-
+      {{ 'started'
+          if ((keycloak_deploy_rootless_keycloak_applied.content | default('') | b64decode | trim)
+              == keycloak_deploy_rootless_keycloak_manifest.stat.checksum)
+          else 'restarted' }}
+    podman_systemd_unit_name: "{{ keycloak_deploy_systemd_unit_name }}"
+    podman_systemd_description: "Rootless keycloak"
+    podman_systemd_manifest_path: "{{ keycloak_deploy_config_dir }}/keycloak-rootless-pod.yml"
+    podman_systemd_scope: user
+    podman_systemd_quadlet_dir: "{{ keycloak_deploy_rootless_quadlet_dir }}"
+    podman_systemd_install_wanted_by: default.target
+    podman_systemd_enabled: true
+    podman_systemd_networks:
+      - "{{ keycloak_deploy_rootless_network }}.network:ip={{ keycloak_deploy_rootless_keycloak_ip }}"
+    podman_systemd_after:
+      - network-online.target
+      - "{{ keycloak_deploy_postgres_pod_name }}-pod.service"
+    podman_systemd_wants:
+      - network-online.target
+      - "{{ keycloak_deploy_postgres_pod_name }}-pod.service"
+
+- name: Wait for host-loopback Keycloak readiness
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ keycloak_deploy_management_port }}/health/ready"
+    status_code: 200
+  register: keycloak_deploy_rootless_keycloak_ready
+  until: keycloak_deploy_rootless_keycloak_ready.status | default(0) == 200
+  retries: 60
+  delay: 5
+  when: keycloak_deploy_rootless_publish_management | bool
+
+- name: Require private Keycloak readiness when no management port is published
+  ansible.builtin.command:
+    argv:
+      - timeout
+      - '10'
+      - podman
+      - exec
+      - "{{ keycloak_deploy_pod_name }}-{{ keycloak_deploy_container_name }}"
+      - /bin/bash
+      - -ec
+      - |-
+        exec 3<>/dev/tcp/127.0.0.1/9000
+        printf 'GET /health/ready HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3
+        IFS= read -r status <&3
+        [[ "$status" == HTTP/*' 200 '* ]]
+  changed_when: false
+  register: keycloak_deploy_rootless_private_ready
+  until: keycloak_deploy_rootless_private_ready.rc == 0
+  retries: 60
+  delay: 5
+  when: not keycloak_deploy_rootless_publish_management | bool
+
+- name: Record the successfully applied keycloak identity
+  ansible.builtin.copy:
+    content: "{{ keycloak_deploy_rootless_keycloak_manifest.stat.checksum }}\n"
+    dest: "{{ keycloak_deploy_config_dir }}/.keycloak-last-applied"
+    mode: '0600'
+  no_log: true
+  diff: false

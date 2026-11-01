@@ -1,7 +1,13 @@
 ---
 - name: Prechecks
   ansible.builtin.import_tasks: assert.yml
+  when: nginx_deploy_systemd_scope != 'user'
   tags: always
+
+- name: Deploy rootless Nginx runtime
+  ansible.builtin.include_tasks: rootless.yml
+  when: nginx_deploy_systemd_scope == 'user'
 
 - name: Deploy Nginx runtime
   ansible.builtin.include_tasks: deploy.yml
+  when: nginx_deploy_systemd_scope != 'user'

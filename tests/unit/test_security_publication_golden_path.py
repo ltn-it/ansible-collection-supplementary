@@ -661,21 +661,14 @@ clock.write_text(str(int(clock.read_text()) + int(sys.argv[1])))
     def test_repository_local_release_jobs_have_bounded_class_limits(self) -> None:
         selected = {
             "changelog.yml": {"changelog": 30},
+            "openssf-scorecard.yml": {"scorecard": 60, "upload-sarif": 10},
             "collection-ci.yml": {
                 "quality-matrix": 10,
                 "tiny": 10,
                 "fast": 10,
                 "heavy": 10,
                 "acceptance": 10,
-                "legacy-lint": 10,
-                "legacy-build": 10,
-                "legacy-molecule": 10,
-                "keycloak-legacy-lint-sanity": 10,
-                "keycloak-legacy-tiny": 10,
-                "keycloak-legacy-heavy": 10,
-                "keycloak-legacy-acceptance": 10,
-                "keycloak-legacy-evidence": 10,
-                "keycloak-legacy-release-validation": 10,
+                "release-admission": 10,
             },
             "release-back-sync.yml": {"back-sync": 60},
             "release-prepare.yml": {"prepare": 60},
