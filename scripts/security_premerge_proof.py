@@ -112,7 +112,8 @@ def policy_schema(policy, repository):
             policy["version"] == 2
             and type(contract) is dict
             and type(contract.get("version")) is int
-            and contract == {
+            and contract
+            == {
                 "version": 2,
                 "candidate_scope": "repository-head",
                 "legacy_claims": "consumed",
