@@ -97,11 +97,29 @@ def json_blob(root, revision, path, *, document=False):
     return value, raw
 
 
-def route(root, source):
-    policy, _unused = json_blob(root, source, ".lit/workflow-control.json")
+def policy_schema(policy, repository):
+    """Read the fixed target's installed schema without granting admission."""
     require(
-        policy.get("repository") == C.PRODUCER_REPOSITORY and policy.get("version") == 1, "protected-policy-identity"
+        repository in {C.PRODUCER_REPOSITORY, "ltn-it/ansible-collection-supplementary"}
+        and policy.get("repository") in {C.PRODUCER_REPOSITORY, "ltn-it/ansible-collection-supplementary"}
+        and type(policy.get("version")) is int
+        and policy["version"] in {1, 2},
+        "protected-policy-identity",
     )
+    if "supplementary_funding_contract" in policy:
+        contract = policy["supplementary_funding_contract"]
+        require(
+            policy["version"] == 2
+            and type(contract) is dict
+            and type(contract.get("version")) is int
+            and contract == {
+                "version": 2,
+                "candidate_scope": "repository-head",
+                "legacy_claims": "consumed",
+                "unknown_outcomes": "consumed_uncertain",
+            },
+            "supplementary-funding-contract-shape",
+        )
     if "security_profile" not in policy:
         return "legacy"
     require(
@@ -111,6 +129,11 @@ def route(root, source):
     # This selector only removes legacy funding. It grants no Common admission;
     # the independent Source registry may still reject this producer entirely.
     return "producer-only"
+
+
+def route(root, source):
+    policy, _unused = json_blob(root, source, ".lit/workflow-control.json")
+    return policy_schema(policy, C.PRODUCER_REPOSITORY)
 
 
 def locator(kind, run, attempt):

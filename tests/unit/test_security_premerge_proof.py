@@ -231,27 +231,58 @@ class SecurityPremergeProofTests(unittest.TestCase):
             EMIT.parse(b'{"x":1,"x":2}', "duplicate")
 
     def test_protected_selector_only_withdraws_legacy_funding(self):
-        for selector, expected in (
-            ("absent", "legacy"),
-            (EMIT.PROFILE, "producer-only"),
-            (None, None),
-            (True, None),
-            ("unknown", None),
-        ):
-            with self.subTest(selector=selector):
-                policy = {"version": 1, "repository": EMIT.C.PRODUCER_REPOSITORY}
-                if selector != "absent":
-                    policy["security_profile"] = selector
-                path = self.root / ".lit/workflow-control.json"
-                path.write_bytes(EMIT.canonical(policy))
-                FIXTURE.git(self.root, "add", str(path))
-                FIXTURE.git(self.root, "commit", "-q", "-m", f"protected selector {selector}")
-                source = FIXTURE.git(self.root, "rev-parse", "HEAD")
-                if expected:
-                    self.assertEqual(expected, EMIT.route(self.root, source))
-                else:
-                    with self.assertRaisesRegex(ValueError, "unknown-security-profile"):
-                        EMIT.route(self.root, source)
+        for version in (1, 2):
+            for selector, expected in (
+                ("absent", "legacy"),
+                (EMIT.PROFILE, "producer-only"),
+                (None, None),
+                (True, None),
+                ("unknown", None),
+            ):
+                with self.subTest(version=version, selector=selector):
+                    policy = {"version": version, "repository": EMIT.C.PRODUCER_REPOSITORY}
+                    if version == 2:
+                        policy["supplementary_funding_contract"] = {
+                            "version": 2,
+                            "candidate_scope": "repository-head",
+                            "legacy_claims": "consumed",
+                            "unknown_outcomes": "consumed_uncertain",
+                        }
+                    if selector != "absent":
+                        policy["security_profile"] = selector
+                    path = self.root / ".lit/workflow-control.json"
+                    path.write_bytes(EMIT.canonical(policy))
+                    FIXTURE.git(self.root, "add", str(path))
+                    FIXTURE.git(self.root, "commit", "-q", "-m", f"protected schema {version} selector {selector}")
+                    source = FIXTURE.git(self.root, "rev-parse", "HEAD")
+                    if expected:
+                        self.assertEqual(expected, EMIT.route(self.root, source))
+                    else:
+                        with self.assertRaisesRegex(ValueError, "unknown-security-profile"):
+                            EMIT.route(self.root, source)
+
+    def test_schema_and_funding_contract_never_grant_security_or_unknown_policy_authority(self):
+        baseline = {"version": 2, "repository": EMIT.C.PRODUCER_REPOSITORY}
+        self.assertEqual("legacy", EMIT.policy_schema(baseline, EMIT.C.PRODUCER_REPOSITORY))
+        for version in (True, "2", 0, 3, None):
+            with self.subTest(version=version), self.assertRaisesRegex(ValueError, "policy-identity"):
+                EMIT.policy_schema(baseline | {"version": version}, EMIT.C.PRODUCER_REPOSITORY)
+        contract = {
+            "version": 2,
+            "candidate_scope": "repository-head",
+            "legacy_claims": "consumed",
+            "unknown_outcomes": "consumed_uncertain",
+        }
+        for field, value in (("version", True), ("candidate_scope", "pull"), ("unknown_outcomes", "unused")):
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "funding-contract-shape"):
+                EMIT.policy_schema(
+                    baseline | {"supplementary_funding_contract": contract | {field: value}},
+                    EMIT.C.PRODUCER_REPOSITORY,
+                )
+        with self.assertRaisesRegex(ValueError, "funding-contract-shape"):
+            EMIT.policy_schema(
+                baseline | {"version": 1, "supplementary_funding_contract": contract}, EMIT.C.PRODUCER_REPOSITORY
+            )
 
     def readiness(self, kind, route, *, defect=None, after_ready=False, existing_ready=False):
         workflow_name, job, start = {

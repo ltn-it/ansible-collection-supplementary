@@ -1,0 +1,2 @@
+bugfixes:
+  - Read the protected Supplementary v2 policy in Security routing and normal-release verification while preserving consumed funding, source-lineage, native evidence, and producer-only boundaries.
