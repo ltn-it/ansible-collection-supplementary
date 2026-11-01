@@ -39,6 +39,7 @@ class NormalPreparationChangelogTests(unittest.TestCase):
             "normal_release_archive.py",
             "release-version.py",
             "security_main_promotion.py",
+            "security_premerge_proof.py",
             "security_release_contract.py",
         ):
             shutil.copy2(ROOT / "scripts" / name, scripts)
