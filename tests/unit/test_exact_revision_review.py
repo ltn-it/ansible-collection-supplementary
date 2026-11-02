@@ -758,14 +758,14 @@ class ExactRevisionWorkflowContractTests(unittest.TestCase):
 
     def test_main_backmerge_has_deterministic_reviewable_evidence(self) -> None:
         workflow = (ROOT / ".github/workflows/sync-main-to-develop.yml").read_text(encoding="utf-8")
-        changelog_policy = (ROOT / "scripts/devtools-changelog-check.sh").read_text(encoding="utf-8")
         self.assertIn("Create reviewable ancestry backmerge", workflow)
         self.assertIn("git merge --no-ff --no-commit --strategy=ours origin/main", workflow)
         self.assertIn("evidence_path='.lit/main-ancestry.json'", workflow)
         self.assertIn('test "$(git diff --name-only origin/develop HEAD --)"', workflow)
         self.assertNotIn("Create file-identical ancestry backmerge", workflow)
         self.assertNotIn("git diff --quiet origin/develop HEAD", workflow)
-        self.assertIn('non_user_visible_re+="\\\\.lit/main-ancestry\\\\.json$|"', changelog_policy)
+        # ChangelogMetadataTests exercise the real Git/Bash classification of
+        # .lit/main-ancestry.json; the obsolete single-file regex is not a contract.
 
         evidence = json.loads((ROOT / ".lit/main-ancestry.json").read_text(encoding="utf-8"))
         self.assertEqual(evidence["schema_version"], 1)
