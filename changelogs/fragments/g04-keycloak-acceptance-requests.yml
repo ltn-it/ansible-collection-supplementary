@@ -1,0 +1,5 @@
+---
+bugfixes:
+  - >-
+    Keycloak application acceptance - install the Requests dependency required
+    by the Authlib Flask client so the isolated Gunicorn worker can boot.
