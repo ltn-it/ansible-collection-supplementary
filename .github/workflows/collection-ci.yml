@@ -1071,6 +1071,8 @@ jobs:
           cache_dir="$RUNNER_TEMP/trivy-cache-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           test ! -e "$cache_dir"
           mkdir -m 0700 "$cache_dir"
+          # OCI download staging must not fill the bounded in-memory /tmp.
+          mkdir -m 0700 "$cache_dir/tmp"
           docker run --rm \
             --read-only \
             --user "$(id -u):$(id -g)" \
@@ -1079,6 +1081,7 @@ jobs:
             --pids-limit 128 \
             --network bridge \
             --tmpfs /tmp:rw,noexec,nosuid,nodev,size=256m,mode=1777 \
+            -e TMPDIR=/trivy-cache/tmp \
             -v "$PWD:/workspace:ro" \
             -v "$cache_dir:/trivy-cache:rw" \
             -w /workspace \
