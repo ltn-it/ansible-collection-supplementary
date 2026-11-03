@@ -14,5 +14,11 @@
   ],
   "accepted_sources": [],
   "distribution_sources": [],
-  "artifact_publication": true
+  "artifact_publication": true,
+  "supplementary_funding_contract": {
+    "version": 2,
+    "candidate_scope": "repository-head",
+    "legacy_claims": "consumed",
+    "unknown_outcomes": "consumed_uncertain"
+  }
 }
