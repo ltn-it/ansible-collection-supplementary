@@ -121,6 +121,7 @@ CHECK_PROFILE = {
 TRUSTED_CHECK_POLICY_PATHS = (
     ".pre-commit-config.yaml",
     ".lit/push-ready.json",
+    ".lit/ltn399-push-ready-origin-adoption.json",
     SECRET_FIXTURE_MANIFEST_PATH,
     "scripts/lit-ci-profile.sh",
     "scripts/devtools-local-quality.sh",
@@ -3812,24 +3813,32 @@ def runtime_versions() -> dict[str, str]:
 
 def governed_push_remote_from_url(name: str, url: str) -> dict[str, str]:
     if name != "origin" or not url or any(ord(character) < 32 or ord(character) == 127 for character in url):
-        raise RuntimeError("governed origin required")
+        raise RuntimeError("push-ready requires the governed origin remote")
     value = url[:-4] if url.endswith(".git") else url
-    prefixes = (
-        "https://github.com/lightning-it/",
-        "ssh://git@github.com/lightning-it/",
-        "git@github.com:lightning-it/",
+    # Preserve the owner in the binding: legacy installations and their exact
+    # evidence remain distinct from remotes using the renamed organization.
+    prefixes = tuple(
+        (owner, prefix)
+        for owner in ("ltn-it", "lightning-it")
+        for prefix in (
+            f"https://github.com/{owner}/",
+            f"ssh://git@github.com/{owner}/",
+            f"git@github.com:{owner}/",
+        )
     )
+    repository_owner = ""
     repository_name = ""
-    for prefix in prefixes:
+    for owner, prefix in prefixes:
         if value.startswith(prefix):
+            repository_owner = owner
             repository_name = value[len(prefix) :]
             break
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", repository_name):
-        raise RuntimeError("origin must target lightning-it on github.com")
+    if repository_name != ".github" and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", repository_name):
+        raise RuntimeError("origin push URL must target a Lightning IT repository on github.com")
     return {
         "name": "origin",
         "host": "github.com",
-        "repository": f"lightning-it/{repository_name}",
+        "repository": f"{repository_owner}/{repository_name}",
         "url_sha256": sha256_text(url),
     }
 
