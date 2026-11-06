@@ -3,7 +3,7 @@
 semaphore_deploy_pod_name: "semaphore"
 semaphore_deploy_pod_manifest_path: "/etc/podman/pods/semaphore.yml"
 semaphore_deploy_image: >-
-  docker.io/semaphoreui/semaphore:latest@sha256:6d45ab59ec50e8963b00461067ef884ffdeedaaf8162bc07d42c5901c2a85e2b
+  docker.io/semaphoreui/semaphore:latest@sha256:008dacd9f1adbd92e8a048f1786ae1dd9bed2a352aca2eb30b9837de5706e7f7
 
 # Dedicated PostgreSQL service defaults used by semaphore_deploy
 # Default is shared PostgreSQL managed outside this role.
