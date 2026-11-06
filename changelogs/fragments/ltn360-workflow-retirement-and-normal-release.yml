@@ -1,0 +1,12 @@
+---
+bugfixes:
+  - >-
+    Remove retired review, refresh, retry and automerge controllers while preserving
+    required current-revision checks and normal release approvals.
+  - >-
+    Keep normal release preparation, publication evidence and back-sync bound to
+    the reviewed revisions and artifacts, rejecting unbound validation runs.
+  - >-
+    Resolve the existing ModuLix quality workflow under the renamed organization,
+    keep release preparation within GitHub's step limit, preserve first-time
+    artifact inventory recording, and make ownership tests portable to hosted runners.

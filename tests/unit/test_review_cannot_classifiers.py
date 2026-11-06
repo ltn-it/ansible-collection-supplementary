@@ -2,13 +2,12 @@
 
 import ast
 import json
-import os
 import re
 import shutil
 import subprocess
 import unittest
 
-from unit.review_event_contract_helpers import ROOT, shell_function
+from unit.review_event_contract_helpers import ROOT
 
 NEGATIVES = (
     "I can't review this pull request.",
@@ -21,11 +20,7 @@ NEGATIVES = (
     "I isn\u2019t able to review any files.",
 )
 POSITIVE = "I can review any files."
-WORKFLOWS = (
-    ".github/workflows/copilot-review.yml",
-    ".github/workflows/copilot-review-refresh.yml",
-    ".github/workflows/codex-copilot-remediation.yml",
-)
+WORKFLOWS = (".github/workflows/copilot-review.yml",)
 
 
 class CannotReviewClassifierTests(unittest.TestCase):
@@ -64,7 +59,7 @@ class CannotReviewClassifierTests(unittest.TestCase):
             text = (ROOT / name).read_text()
             chains.extend(re.findall(r'gsub\("can\[.*?\]t"; "cannot"\) \| gsub\("n\[.*?\]t"; " not"\)', text))
             self.assertEqual(text.count('gsub("n['), text.count('gsub("can['), name)
-        self.assertEqual(5, len(chains))
+        self.assertEqual(1, len(chains))
         for phrase in (*NEGATIVES, POSITIVE):
             normalized = canonical["normalize"](phrase)
             for chain in chains:
@@ -101,24 +96,3 @@ class CannotReviewClassifierTests(unittest.TestCase):
                 }
                 counts = self.run_jq(program, {"data": {"node": node}}, args).split()
                 self.assertEqual("0" if phrase == POSITIVE else "1", counts[0])
-
-    def test_actual_legacy_refresh_jq_and_shell_case_reject_body_and_inline(self):
-        function = shell_function(ROOT / WORKFLOWS[1], "review_body_is_usable")
-        script = 'gh() { printf "%s" "$COMMENTS"; }\n' + function + '\nreview_body_is_usable <<<"$REVIEW"'
-        for phrase in (*NEGATIVES, POSITIVE):
-            for inline in (False, True):
-                result = subprocess.run(  # noqa: S603 -- actual local function; transport emits only fixed fixture JSON.
-                    [shutil.which("bash") or "/bin/bash", "-c", script],
-                    env={
-                        **os.environ,
-                        "REPOSITORY": "lightning-it/ansible-collection-supplementary",
-                        "PR_NUMBER": "23",
-                        "REVIEW_ID": "17",
-                        "REVIEW": json.dumps({"body": "Reviewed." if inline else phrase}),
-                        "COMMENTS": json.dumps([[{"body": phrase, "pull_request_review_id": 17}]] if inline else [[]]),
-                    },
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-                self.assertEqual(phrase == POSITIVE, result.returncode == 0, result.stderr)

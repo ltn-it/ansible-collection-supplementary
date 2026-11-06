@@ -121,6 +121,55 @@ class ReleaseReadinessDataTests(unittest.TestCase):
         self.assertEqual("${{ steps.tips.outputs.content_sha }}", exporter["env"]["CONTENT_SHA"])
         self.assertNotIn("PYTHONPATH", str(job))
 
+    @unittest.skipUnless(
+        ROOT == Path("/workspace") and (ROOT / ".git").exists(),
+        "positive ownership probe requires the actual Devtools Git mount",
+    )
+    def test_scoped_workspace_git_trust_accepts_only_the_actual_devtools_mount(self):
+        executable = shutil.which("git")
+        assert executable
+        env = self.env | {"GIT_TEST_ASSUME_DIFFERENT_OWNER": "1"}
+        # The actual Devtools mount is the only admitted differing-owner path.
+        raw = subprocess.run(  # noqa: S603 -- fixed read-only ownership regression.
+            [executable, "-C", "/workspace", "rev-parse", "HEAD"],
+            env=env,
+            capture_output=True,
+            check=False,
+        )
+        self.assertNotEqual(0, raw.returncode)
+        revision = subprocess.check_output(  # noqa: S603 -- exact scoped trust.
+            [executable, "-c", "safe.directory=/workspace", "-C", "/workspace", "rev-parse", "HEAD"],
+            env=env,
+            text=True,
+        ).strip()
+        destination = self.root / "workspace-data"
+        result = subprocess.run(  # noqa: S603 -- actual helper in the read-only EE workspace.
+            [sys.executable, str(HELPER), "--revision", revision, "--destination", str(destination)],
+            cwd="/workspace",
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue((destination / "galaxy.yml").is_file())
+
+    def test_scoped_workspace_git_trust_does_not_trust_an_unrelated_repository(self):
+        unrelated = self.export(self.commit())
+        self.assertEqual(0, unrelated.returncode, unrelated.stderr)
+        # The same helper must not admit this unrelated differing-owner fixture.
+        env = self.env | {"GIT_TEST_ASSUME_DIFFERENT_OWNER": "1"}
+        denied = subprocess.run(  # noqa: S603 -- no global safe.directory exemption.
+            [sys.executable, str(HELPER), "--revision", self.git("rev-parse", "HEAD"), "--destination", "forbidden"],
+            cwd=self.root,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(0, denied.returncode)
+        self.assertFalse((self.root / "forbidden").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

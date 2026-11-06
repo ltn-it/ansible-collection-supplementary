@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -580,6 +581,26 @@ clock.write_text(str(int(clock.read_text()) + int(sys.argv[1])))
         for name in deferred_names:
             stage = {key: value for key, value in self.steps[name].items() if key != "if"}
             final = {key: value for key, value in self.finalize_steps[name].items() if key != "if"}
+            normal_transport_steps = {
+                "Finalize immutable release attachments and notes",
+                "Require configured publication credentials",
+                "Create or verify immutable tag with dedicated App",
+                "Create or verify GitHub Release and immutable assets",
+                "Publish or verify validated artifact on Ansible Galaxy",
+                "Verify GitHub Release download, install, and smoke",
+                "Verify Galaxy version install and smoke",
+            }
+            if name in normal_transport_steps:
+                prefix = 'set -euo pipefail\nif [ "${NORMAL_TWO_STAGE:-false}" = true ]; then\n'
+                separator = "else\n  # Preserved legacy and Security publication implementation.\n"
+                self.assertTrue(stage["run"].startswith(prefix), name)
+                self.assertEqual(1, stage["run"].count(separator), name)
+                self.assertTrue(stage["run"].endswith("fi\n"), name)
+                normal, legacy = stage["run"][len(prefix) : -len("fi\n")].split(separator)
+                self.assertIn("scripts/wunder-devtools-ee.sh", normal, name)
+                # Compare the complete preserved Security branch below, including
+                # every signature, publication, readback and environment field.
+                stage["run"] = textwrap.dedent(legacy)
             if name in normal_legacy_guards:
                 legacy_guard = normal_legacy_guards[name]
                 self.assertEqual(1, stage["run"].count(legacy_guard), name)

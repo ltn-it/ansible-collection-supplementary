@@ -95,13 +95,15 @@ container_images:
     locations:
       - "manifests/identity-stack.pod.yaml"
       - "roles/keycloak_deploy/defaults/main.yml"
-  - reference: "quay.io/l-it/ee-wunder-devtools-ubi9:v1.16.1@sha256:c5e8707e825fcddb3e7bbc7592ebdc99a02e6ba9fa2cad71b88bcd5c71bd4d08"
+  - reference: "quay.io/l-it/ee-wunder-devtools-ubi9:v1.18.2@sha256:58955457d3410706520f34fa7ea9823d5650aa4844c562cd5c0107024d825711"
     locations:
       - "examples/aap-cac.yml"
+      - "scripts/wunder-devtools-ee.sh"
+  - reference: "quay.io/l-it/ee-wunder-devtools-ubi9:v1.16.1@sha256:c5e8707e825fcddb3e7bbc7592ebdc99a02e6ba9fa2cad71b88bcd5c71bd4d08"
+    locations:
       - "scripts/exact_revision_gateway.py"
       - "scripts/lit-push-ready.py"
       - "scripts/run-native-verifier-retry.sh"
-      - "scripts/wunder-devtools-ee.sh"
   - reference: "quay.io/minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727"
     locations:
       - "roles/minio_bootstrap/defaults/main.yml"

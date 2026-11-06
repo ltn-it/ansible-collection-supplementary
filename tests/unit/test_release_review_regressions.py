@@ -252,10 +252,12 @@ if sys.argv[1]=='release':
 
     def test_symlink_write_target_fails_before_parser_or_generator(self):
         script = step("release-prepare.yml", "prepare", "Prepare release branch")["run"]
-        guard = script.split("# LI-344 regular generation inputs:start\n", 1)[1].split(
+        helper = (ROOT / "scripts/normal_release_environment.sh").read_text()
+        guard = helper.split("# LI-344 regular generation inputs:start\n", 1)[1].split(
             "# LI-344 regular generation inputs:end", 1
         )[0]
-        self.assertLess(script.index("# LI-344 regular generation inputs:end"), script.index('version_resolution="$('))
+        self.assertIn('git show "$WORKFLOW_SOURCE_SHA:scripts/normal_release_environment.sh"', script)
+        self.assertLess(script.index("# LI-360 normal EE transport:end"), script.index('version_resolution="$('))
         for name in (
             "galaxy.yml",
             "CHANGELOG.rst",
@@ -269,8 +271,12 @@ if sys.argv[1]=='release':
                 outside.write_text("trusted")
                 path = root / name
                 path.symlink_to(outside)
-                result = shell(guard, root, environment())
+                result = shell("release_data() { bash -s; }\n" + guard, root, environment())
                 self.assertNotEqual(0, result.returncode)
+                if name.endswith("change.yml"):
+                    self.assertIn("required", result.stderr)
+                else:
+                    self.assertIn("symlink", result.stderr)
                 self.assertEqual("trusted", outside.read_text())
 
 
@@ -280,6 +286,7 @@ class PublishDispatchNoopTests(unittest.TestCase):
     ):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            BACKSYNC.FIXTURE.install_ee_dispatcher(root)
             binary = root / "gh"
             binary.write_text(
                 "#!"
@@ -336,6 +343,7 @@ else: raise SystemExit('unexpected API locator '+path)
                     "CALLS": str(calls),
                     "GITHUB_OUTPUT": str(output),
                     "RUNNER_TEMP": str(root),
+                    "GITHUB_WORKSPACE": str(root),
                     "GITHUB_REPOSITORY": REPOSITORY,
                     "MERGE_SHA": "a" * 40,
                     "REVIEWED_HEAD_SHA": "c" * 40,
@@ -360,7 +368,11 @@ else: raise SystemExit('unexpected API locator '+path)
         self.assertEqual("false", outputs.get("release_needed"))
         self.assertNotIn("release_version", outputs)
         workflow = yaml.safe_load((ROOT / ".github/workflows/collection-publish.yml").read_text())
-        for later in workflow["jobs"]["dispatch"]["steps"][1:]:
+        steps = workflow["jobs"]["dispatch"]["steps"]
+        self.assertEqual("${{ github.sha }}", steps[0]["with"]["ref"])
+        self.assertFalse(steps[0]["with"]["persist-credentials"])
+        classification = next(index for index, item in enumerate(steps) if item.get("id") == "release")
+        for later in steps[classification + 1 :]:
             self.assertEqual("steps.release.outputs.release_needed == 'true'", later.get("if"), later["name"])
 
     def test_real_release_state_change_and_legacy_dispatch_are_preserved(self):
@@ -546,9 +558,10 @@ class CanonicalAncestryOwnershipTests(unittest.TestCase):
 
 
 class LegacyPublicationReadOnlyTests(unittest.TestCase):
-    def run_publication(self, name, *, present=True, legacy=True):
+    def run_publication(self, name, *, present=True, legacy=True, two_stage=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            BACKSYNC.FIXTURE.install_ee_dispatcher(root)
             binary, remote = root / "bin", root / "remote"
             binary.mkdir()
             remote.mkdir()
@@ -564,6 +577,7 @@ class LegacyPublicationReadOnlyTests(unittest.TestCase):
                 "CALLS": str(calls),
                 "REMOTE": str(remote),
                 "RUNNER_TEMP": str(root),
+                "GITHUB_WORKSPACE": str(root),
                 "RELEASE_SHA": "a" * 40,
                 "RELEASE_TAG": "v1.0.0",
                 "GITHUB_REPOSITORY": REPOSITORY,
@@ -573,12 +587,22 @@ class LegacyPublicationReadOnlyTests(unittest.TestCase):
                 "GALAXY_REQUIRED": "true",
                 "SECURITY_RELEASE": "false",
                 "LEGACY_NORMAL_RECHECK": str(legacy).lower(),
+                "NORMAL_TWO_STAGE": str(two_stage).lower(),
             }
             script = step("collection-publish.yml", "publish", name)["run"]
+            transport_prefix = 'set -euo pipefail\nif [ "${NORMAL_TWO_STAGE:-false}" = true ]; then\n'
+            if script.startswith(transport_prefix):
+                # This fixture executes one real branch before isolating the
+                # checksum emitter. The golden-path test checks the outer
+                # predicate and complete preserved Security branch separately.
+                normal, retained = script[len(transport_prefix) : -len("fi\n")].split(
+                    "else\n  # Preserved legacy and Security publication implementation.\n"
+                )
+                script = normal if two_stage else retained
             if name == "Finalize immutable release attachments and notes":
                 # Exercise the actual checksum/signing shell; the following
                 # Python block only renders local notes for a later step.
-                script = script.split("python - <<'PY'", 1)[0]
+                script = script.split('notes_program="', 1)[0].split("python - <<'PY'\n", 1)[0]
                 generated = shell(script.split('publish_identity="', 1)[0], root, env)
                 self.assertEqual(0, generated.returncode, generated.stderr)
                 if present:
@@ -740,3 +764,197 @@ elif args[0]!='verify-blob': raise SystemExit('unexpected cosign operation')
                         call[:2] == ["cosign", "sign-blob"] or call[:3] == ["gh", "release", "upload"] for call in calls
                     )
                 )
+
+    def test_normal_ee_transport_preserves_existing_assets_and_rejects_missing_legacy_evidence(self):
+        for name in (
+            "Finalize immutable release attachments and notes",
+            "Create or verify GitHub Release and immutable assets",
+        ):
+            for present, legacy in ((True, True), (False, True), (False, False)):
+                with self.subTest(step=name, present=present, legacy=legacy):
+                    result, calls = self.run_publication(name, present=present, legacy=legacy, two_stage=True)
+                    writes = [
+                        call
+                        for call in calls
+                        if call[:2] == ["cosign", "sign-blob"] or call[:3] == ["gh", "release", "upload"]
+                    ]
+                    if not present and legacy:
+                        self.assertNotEqual(0, result.returncode)
+                        self.assertEqual([], writes)
+                    else:
+                        self.assertEqual(0, result.returncode, result.stderr)
+                        self.assertEqual(not present, bool(writes))
+
+
+class NormalPreparationEnvironmentTests(unittest.TestCase):
+    """Actual workflow operations use the installed release toolchain.
+
+    The fixture substitutes only the outer container mount/launch, because an
+    offline EE cannot and must not receive a Docker socket for nested launches.
+    Hosted unit tests install the same changelog-tool version explicitly.
+    """
+
+    def fixture(self, directory):
+        root = Path(directory) / "repository"
+        root.mkdir()
+        (root / "scripts").mkdir()
+        for name in (
+            "release-version.py",
+            "security_release_contract.py",
+            "normal_release_environment.sh",
+            "normal_release_proof.py",
+            "normal_release_archive.py",
+            "security_main_promotion.py",
+        ):
+            shutil.copyfile(ROOT / "scripts" / name, root / "scripts" / name)
+        launcher = root / "scripts/wunder-devtools-ee.sh"
+        launcher.write_text(
+            "#!/bin/bash\nset -euo pipefail\n"
+            'test "$WUNDER_DEVTOOLS_WORKSPACE_MODE" = rw\n'
+            'test "$WUNDER_DEVTOOLS_RUN_AS_HOST_UID" = 1\n'
+            'test "$1" = bash && test "$2" = -c\n'
+            'program="${3//\\/workspace/$PWD}"\nshift 3\n'
+            'exec env -i PATH="$PATH" HOME="$HOME" bash -c "$program" "$@"\n'
+        )
+        (root / "changelogs/fragments").mkdir(parents=True)
+        (root / "changelogs/fragments/.gitkeep").write_text("")
+        (root / "galaxy.yml").write_text(
+            "namespace: lit\nname: supplementary\nversion: 1.0.0\n"
+            "readme: README.md\nauthors: [Fixture]\nlicense: [MIT]\ndependencies: {}\n"
+        )
+        (root / "README.md").write_text("Fixture\n")
+        (root / "CHANGELOG.rst").write_text("Initial\n=======\n")
+        (root / "changelogs/changelog.yaml").write_text("releases: {}\n")
+        (root / "changelogs/.plugin-cache.yaml").write_text("version: 1.0.0\nplugins: {}\nobjects: {}\n")
+        shutil.copyfile(ROOT / "changelogs/config.yaml", root / "changelogs/config.yaml")
+        (root / "meta").mkdir()
+        (root / "meta/runtime.yml").write_text("requires_ansible: '>=2.18.0'\n")
+        env = environment() | {
+            "GIT_AUTHOR_NAME": "Fixture",
+            "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+            "GIT_COMMITTER_NAME": "Fixture",
+            "GIT_COMMITTER_EMAIL": "fixture@example.invalid",
+            "GITHUB_WORKSPACE": str(root),
+            "RUNNER_TEMP": str(Path(directory) / "runner"),
+            "workflow_source": str(root),
+            "SECURITY_RELEASE": "false",
+            "VERSION": "",
+            "VERSION_INPUT": "",
+            "CREATE_GITHUB_RELEASE": "true",
+            "PUBLISH_GALAXY": "true",
+            "GITHUB_REPOSITORY": REPOSITORY,
+            "REPOSITORY_ID": "1103407173",
+            "GITHUB_RUN_ID": "42",
+            "GITHUB_RUN_ATTEMPT": "1",
+            "WORKFLOW_EVENT": "workflow_dispatch",
+            "WORKFLOW_REF": f"{REPOSITORY}/.github/workflows/release-prepare.yml@refs/heads/main",
+            "WORKFLOW_ACTOR": "fixture",
+            "GH_TOKEN": "must-never-enter-the-environment",
+        }
+        Path(env["RUNNER_TEMP"]).mkdir()
+        git = ["/usr/bin/git", "-C", str(root)]
+        for arguments in (("init", "-q"), ("add", "."), ("commit", "-qm", "Main tooling")):
+            subprocess.run(git + list(arguments), env=env, check=True, capture_output=True)  # noqa: S603
+        env["WORKFLOW_SOURCE_SHA"] = subprocess.check_output(git + ["rev-parse", "HEAD"], env=env, text=True).strip()  # noqa: S603
+        (root / "changelogs/fragments/change.yml").write_text("bugfixes:\n  - Reviewed change.\n")
+        (root / "yaml.py").write_text("raise RuntimeError('Develop shadow executed')\n")
+        (root / "scripts/normal_release_environment.sh").write_text("touch candidate-helper-executed\nexit 91\n")
+        for arguments in (("add", "."), ("commit", "-qm", "Develop product")):
+            subprocess.run(git + list(arguments), env=env, check=True, capture_output=True)  # noqa: S603
+        env["BASE_SHA"] = subprocess.check_output(git + ["rev-parse", "HEAD"], env=env, text=True).strip()  # noqa: S603
+        script = step("release-prepare.yml", "prepare", "Prepare release branch")["run"]
+        transport = script.split("# LI-360 normal EE transport:start\n", 1)[1].split(
+            "# LI-360 normal EE transport:end", 1
+        )[0]
+        return root, env, script, transport
+
+    def test_real_generation_and_build_use_main_tooling_and_no_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, env, script, transport = self.fixture(directory)
+
+            def operation(name):
+                source = (
+                    (ROOT / "scripts/normal_release_environment.sh").read_text() if name == "RELEASE_INPUTS" else script
+                )
+                return source.split(f"<<'{name}'\n", 1)[1].split(f"\n{name}\n", 1)[0]
+
+            actual = transport + "\nrelease_data <<'CHECK'\n" + operation("RELEASE_INPUTS") + "\nCHECK\n"
+            actual += "resolution=$(release_data <<'VERSION_OP'\n" + operation("RELEASE_VERSION") + "\nVERSION_OP\n)\n"
+            actual += 'VERSION=$(jq -er .version <<<"$resolution")\nPREPARATION_MODE=normal\n'
+            actual += "release_data <<'GENERATE_OP'\n" + operation("RELEASE_GENERATE") + "\nGENERATE_OP\n"
+            actual += "release_data <<'BUILD_OP'\n" + operation("RELEASE_BUILD") + "\nBUILD_OP\n"
+            actual += "release_data <<'BOUNDARY'\n"
+            actual += 'test -z "${GH_TOKEN:-}"\ntest -z "${GITHUB_TOKEN:-}"\n'
+            actual += 'test -f yaml.py\ntest ! -e "$workflow_source/yaml.py"\nBOUNDARY\n'
+            result = shell(actual, root, env)
+            self.assertEqual(0, result.returncode, result.stderr + result.stdout)
+            self.assertIn("version: 1.0.1", (root / "galaxy.yml").read_text())
+            self.assertFalse((root / "changelogs/fragments/change.yml").exists())
+            self.assertTrue((root / "lit-supplementary-1.0.1.tar.gz").is_file())
+            self.assertFalse((root / "candidate-helper-executed").exists())
+            self.assertIn("Develop shadow executed", (root / "yaml.py").read_text())
+            context = Path(env["RUNNER_TEMP"]) / "normal-release-ee/context.sh"
+            self.assertNotIn(env["GH_TOKEN"], context.read_text())
+
+    def test_failed_environment_in_command_substitution_cannot_return_output_or_copy_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, env, _script, transport = self.fixture(directory)
+            before = (root / "galaxy.yml").read_bytes()
+            actual = transport + "\nresolution=$(release_data <<'FAIL'\n"
+            actual += "printf 'version: 999.0.0\\n' >galaxy.yml\nexit 23\nFAIL\n)\n"
+            actual += "touch forbidden-acceptance\n"
+            result = shell(actual, root, env)
+            self.assertNotEqual(0, result.returncode)
+            self.assertFalse((root / "forbidden-acceptance").exists())
+            self.assertEqual(before, (root / "galaxy.yml").read_bytes())
+
+    def test_generation_commit_to_proof_uses_clean_prepared_data_view(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, env, script, transport = self.fixture(directory)
+
+            def operation(name):
+                return script.split(f"<<'{name}'\n", 1)[1].split(f"\n{name}\n", 1)[0]
+
+            actual = transport + "\nresolution=$(release_data <<'VERSION_OP'\n"
+            actual += operation("RELEASE_VERSION") + "\nVERSION_OP\n)\n"
+            actual += 'VERSION=$(jq -er .version <<<"$resolution")\nPREPARATION_MODE=normal\n'
+            for name in ("RELEASE_GENERATE", "RELEASE_BUILD"):
+                actual += "release_data <<'NEXT_OP'\n" + operation(name) + "\nNEXT_OP\n"
+            actual += "git add galaxy.yml changelogs CHANGELOG.rst\n"
+            actual += 'GIT_AUTHOR_NAME="lightning-it-release-automation[bot]" '
+            actual += 'GIT_AUTHOR_EMAIL="307565056+lightning-it-release-automation[bot]@users.noreply.github.com" '
+            actual += 'GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME" GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL" '
+            actual += 'git commit -qm "chore(release): prepare v${VERSION}"\n'
+            actual += 'pushed_sha=$(git rev-parse HEAD)\nprintf "preserve\\n" >host-untracked-work\n'
+            start = script.index('git -C "$normal_ee_space/data" fetch')
+            end = script.index("release_data <<'RELEASE_PREPARATION_PROOF'", start)
+            actual += script[start:end]
+            actual += "release_data <<'ACTUAL_PREPARATION_PROOF'\n"
+            actual += operation("RELEASE_PREPARATION_PROOF") + "\nACTUAL_PREPARATION_PROOF\n"
+            # Also assert the proof saw the committed clean data view and did
+            # not modify host work or execute the candidate's helper/shadow.
+            actual += "release_data <<'CHECK_PREPARED_PROOF_VIEW'\n"
+            actual += 'test "$(git rev-parse HEAD)" = "$pushed_sha"\n'
+            actual += 'test -z "$(git status --porcelain)"\n'
+            actual += 'git show HEAD:changelogs/release-preparation.json >"$RUNNER_TEMP/committed-receipt.json"\n'
+            actual += 'cmp changelogs/release-preparation.json "$RUNNER_TEMP/committed-receipt.json"\n'
+            actual += 'test "$(jq -er .next_version changelogs/release-preparation.json)" = "$VERSION"\n'
+            actual += 'test -z "${GH_TOKEN:-}" && test -z "${GITHUB_TOKEN:-}"\n'
+            actual += "CHECK_PREPARED_PROOF_VIEW\n"
+            result = shell(actual, root, env)
+            self.assertEqual(0, result.returncode, result.stderr + result.stdout)
+            self.assertEqual("preserve\n", (root / "host-untracked-work").read_text())
+            self.assertFalse((root / "candidate-helper-executed").exists())
+            self.assertIn("Develop shadow executed", (root / "yaml.py").read_text())
+
+    def test_explicit_normal_version_must_still_equal_reviewed_fragment_impact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, env, script, transport = self.fixture(directory)
+            operation = script.split("<<'RELEASE_VERSION'\n", 1)[1].split("\nRELEASE_VERSION\n", 1)[0]
+            actual = transport + "\nresolution=$(release_data --requested-version 1.0.2 <<'VERSION_OP'\n"
+            actual += operation + "\nVERSION_OP\n)\ntouch forbidden-acceptance\n"
+            result = shell(actual, root, env)
+            self.assertNotEqual(0, result.returncode)
+            self.assertFalse((root / "forbidden-acceptance").exists())
+            self.assertIn("version", result.stderr)
+            self.assertNotIn("version: 1.0.2", (root / "galaxy.yml").read_text())

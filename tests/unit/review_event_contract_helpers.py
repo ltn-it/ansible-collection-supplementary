@@ -16,11 +16,7 @@ def shell_function(path, name):
     return textwrap.dedent(text[match.start() : end + len(match[1]) + 2])
 
 
-class CopilotReviewRefreshTests:
-    @staticmethod
-    def _rfn(name):
-        return shell_function(ROOT / ".github/workflows/copilot-review-refresh.yml", name)
-
+class RetainedReviewContracts:
     @staticmethod
     def _rerun_shell_function(name):
         return shell_function(ROOT / ".github/workflows/current-revision-rerun.yml", name)

@@ -1302,9 +1302,14 @@ class WorkflowCouplingTests(unittest.TestCase):
         self.assertEqual("aa45941e2d24194f29f480306bff39d27d7b4824", manifest["core_candidate"])
         self.assertEqual("5b70bdaa4eaa9b0121545cb842eca8b3256e9cc3", manifest["protected_source_commit"])
         self.assertEqual("disabled-until-native-acceptance", manifest["activation"])
+        dormant = {row["path"]: row for row in manifest["dormant_retirement"]["retired_assets"]}
         retirement = json.loads((ROOT / ".lit/li319-central-verifier-retirement.json").read_text())
         policies = {row["path"]: row for row in retirement["policy_updates"]}
         for row in manifest["assets"]:
+            if row["path"] in dormant:
+                self.assertFalse((ROOT / row["path"]).exists())
+                self.assertEqual(row["sha256"], dormant[row["path"]]["sha256"])
+                continue
             content = (ROOT / row["path"]).read_bytes()
             expected = row["sha256"]
             if row["path"] in policies:
@@ -1336,6 +1341,10 @@ class WorkflowCouplingTests(unittest.TestCase):
         inventory = json.loads((ROOT / ".lit/li219-managed-assets.json").read_text())
         local_assets = {asset["path"]: asset for asset in inventory["assets"]}
         for row in manifest["preserved_local_assets"]:
+            if row["path"] in dormant:
+                self.assertFalse((ROOT / row["path"]).exists())
+                self.assertNotIn(row["path"], local_assets)
+                continue
             if row["path"] in retired:
                 self.assertFalse((ROOT / row["path"]).exists())
                 self.assertNotIn(row["path"], local_assets)

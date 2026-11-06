@@ -157,9 +157,8 @@ class WorkflowSecurityTests(unittest.TestCase):
             self.assertNotIn("workflow_dispatch", guard)
         self.assertFalse((WORKFLOWS / "candidate-platform-validation.yml").exists())
 
-    def test_copilot_and_renovate_gates_preserve_safe_update_boundaries(self) -> None:
+    def test_retained_copilot_and_dependency_gates_preserve_safe_update_boundaries(self) -> None:
         copilot = (WORKFLOWS / "copilot-review.yml").read_text(encoding="utf-8")
-        renovate = (WORKFLOWS / "renovate-guarded-automerge.yml").read_text(encoding="utf-8")
         changelog = (WORKFLOWS / "changelog.yml").read_text(encoding="utf-8")
         collection_ci = load_yaml(WORKFLOWS / "collection-ci.yml")
 
@@ -175,14 +174,6 @@ class WorkflowSecurityTests(unittest.TestCase):
         self.assertIn("review_observations=40", copilot)
         self.assertIn('for attempt in $(seq 1 "${review_observations}")', copilot)
         self.assertIn(".isResolved == false", copilot)
-        self.assertIn("expected_safe_event=$'labeled\\tsafe-automerge\\trenovate[bot]'", renovate)
-        self.assertIn('[ "$safe_event" = "$expected_safe_event" ]', renovate)
-        self.assertIn('grep -Fq "$breaking_event_pattern"', renovate)
-        self.assertIn("Enable auto-merge for trusted Renovate PR", renovate)
-        self.assertIn("Enable auto-merge after live-state verification", renovate)
-        self.assertIn('--match-head-commit "${PR_HEAD_SHA}"', renovate)
-        self.assertNotIn("gh pr review", renovate)
-        self.assertIn("prohibits Actions from submitting", renovate)
         self.assertIn('[ "$PR_AUTHOR" = "renovate[bot]" ]', changelog)
         self.assertIn('[ "$PR_BASE" = "develop" ]', changelog)
         self.assertIn('[[ "$PR_HEAD" = renovate/* ]]', changelog)
@@ -270,6 +261,9 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                 with self.subTest(classified=classified):
                     capture = temporary_root / f"capture-{classified}"
                     environment = os.environ.copy()
+                    # The EE activation hook prepends its real Python to PATH;
+                    # this isolated shell fixture must use the explicit stubs.
+                    environment.pop("BASH_ENV", None)
                     environment.update(
                         {
                             "BASE_SHA": "1" * 40,
@@ -531,20 +525,6 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         self.assertNotIn("gh auth setup-git", workflow)
         self.assertNotIn("git fetch", workflow)
 
-        remediation = (WORKFLOWS / "codex-copilot-remediation.yml").read_text(encoding="utf-8")
-        self.assertIn("reviewThreads(first:100,after:$after)", remediation)
-        self.assertIn('if [ "${round}" -gt 1 ]', remediation)
-        self.assertIn("identical Copilot finding set repeated", remediation)
-        self.assertIn("the single automatic repair round was already consumed", remediation)
-        self.assertEqual(1, remediation.count('git commit -m "fix: remediate Copilot findings'))
-        self.assertEqual(1, remediation.count("gh workflow run codex-copilot-remediation.yml"))
-        self.assertNotIn("maximum three automatic repair rounds", remediation)
-        prompt = (ROOT / ".github" / "codex" / "prompts" / "remediate-copilot.md").read_text(encoding="utf-8")
-        self.assertIn("complete thread set", prompt)
-        self.assertIn("one bounded correction package", prompt)
-        self.assertIn("Do not manufacture a no-op", prompt)
-        self.assertIn("only one final Current-Head", prompt)
-
     def test_synchronize_request_requires_enabled_pilot_and_same_head_cas(self) -> None:
         workflow = (WORKFLOWS / "copilot-review.yml").read_text(encoding="utf-8")
         request_job = workflow.split("  request-current-revision-review:", 1)[1].split(
@@ -559,57 +539,8 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         events = [{"action": "synchronize", "commit": index} for index in range(10)]
         self.assertFalse(any(event["action"] == "ready_for_review" for event in events))
 
-    def test_style_only_remediation_cannot_create_a_noop_commit(self) -> None:
-        workflow = (WORKFLOWS / "codex-copilot-remediation.yml").read_text(encoding="utf-8")
-        push_step = workflow.split("      - name: Verify, commit, and push without force", 1)[1].split(
-            "      - name: Explicitly continue after GITHUB_TOKEN push", 1
-        )[0]
-        no_op = "if git diff --quiet && git diff --cached --quiet; then"
-        self.assertLess(push_step.index(no_op), push_step.index("git add -A"))
-        self.assertLess(push_step.index('echo "changed=false"'), push_step.index("git commit -m"))
-        self.assertIn('echo "changed=false" >>"${GITHUB_OUTPUT}"\n            exit 0', push_step)
-        continuation = workflow.split("      - name: Explicitly continue after GITHUB_TOKEN push", 1)[1].split(
-            "  enable-develop-automerge:", 1
-        )[0]
-        self.assertIn("if: steps.push.outputs.changed == 'true'", continuation)
-        self.assertNotIn("enable-develop-automerge-after-evidence-only-remediation", workflow)
-        evidence_free_automerge = workflow.split("  enable-develop-automerge:", 1)[1]
-        self.assertIn("needs.inspect.outputs.actionable == 'false'", evidence_free_automerge)
-        prompt = (ROOT / ".github" / "codex" / "prompts" / "remediate-copilot.md").read_text(encoding="utf-8")
-        self.assertIn("Formatter-, linter-, or type-only style suggestions require no source edit", prompt)
-        self.assertIn("Do not manufacture a no-op", prompt)
-
-    def test_material_remediation_invalidates_old_evidence_and_binds_one_rereview(self) -> None:
-        workflow = (WORKFLOWS / "codex-copilot-remediation.yml").read_text(encoding="utf-8")
-        push_step = workflow.split("      - name: Verify, commit, and push without force", 1)[1].split(
-            "      - name: Explicitly continue after GITHUB_TOKEN push", 1
-        )[0]
-        continuation = workflow.split("      - name: Explicitly continue after GITHUB_TOKEN push", 1)[1].split(
-            "  enable-develop-automerge:", 1
-        )[0]
-        dispatch = workflow.split("  continue-after-push:", 1)[1].split("  inspect:", 1)[0]
-
-        self.assertIn('new_head="$(git rev-parse HEAD)"', push_step)
-        self.assertIn(
-            'test "$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha)" = "${new_head}"',
-            push_step,
-        )
-        self.assertIn('echo "new_head=${new_head}"', push_step)
-        self.assertIn("NEW_HEAD: ${{ steps.push.outputs.new_head }}", continuation)
-        self.assertEqual(1, continuation.count("gh workflow run codex-copilot-remediation.yml"))
-        self.assertIn('-f expected_head="${NEW_HEAD}"', continuation)
-        self.assertIn('test "${current_head}" = "${EXPECTED_HEAD}"', dispatch)
-        self.assertEqual(1, dispatch.count('"repos/${REPOSITORY}/pulls/${PR_NUMBER}/requested_reviewers"'))
-        self.assertEqual(2, dispatch.count("state=consumed"))
-        self.assertEqual(1, dispatch.count('"repos/${REPOSITORY}/issues/${PR_NUMBER}/comments"'))
-        self.assertLess(dispatch.index("state=consumed"), dispatch.index("requested_reviewers"))
-        self.assertIn("the consumed marker forbids an automatic retry", dispatch)
-
     def test_review_automation_has_no_privileged_bypass_path(self) -> None:
-        workflows = "\n".join(
-            (WORKFLOWS / name).read_text(encoding="utf-8")
-            for name in ("copilot-review.yml", "codex-copilot-remediation.yml")
-        )
+        workflows = "\n".join((WORKFLOWS / name).read_text(encoding="utf-8") for name in ("copilot-review.yml",))
         for forbidden in (
             "git push --force",
             "--force-with-lease",
@@ -620,56 +551,6 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, workflows)
-
-    def test_shared_assets_guard_streams_large_check_evidence_via_stdin(self) -> None:
-        workflow = (WORKFLOWS / "shared-assets-guarded-automerge.yml").read_text(encoding="utf-8")
-        self.assertNotIn('--argjson check_pages "$check_runs"', workflow)
-        self.assertNotIn('--argjson status_pages "$status_pages"', workflow)
-
-        start_marker = (
-            '            evidence="$(\n'
-            '              printf \'%s\\n%s\\n\' "$check_runs" "$status_pages" |\n'
-            "                jq -s '\n"
-        )
-        end_marker = "\n              '\n            )\"\n            pending=false"
-        start = workflow.index(start_marker) + len(start_marker)
-        jq_program = workflow[start : workflow.index(end_marker, start)]
-
-        check_pages = [
-            {
-                "check_runs": [
-                    {
-                        "id": 1,
-                        "name": "required / large evidence",
-                        "app": {"id": 15368},
-                        "status": "completed",
-                        "conclusion": "success",
-                        "ignored_payload": "x" * (3 * 1024 * 1024),
-                    }
-                ]
-            }
-        ]
-        jq = shutil.which("jq")
-        if jq is None:
-            self.fail("jq is required for the workflow evidence regression test")
-        result = subprocess.run(  # noqa: S603
-            [jq, "-s", jq_program],
-            input=f"{json.dumps(check_pages)}\n{json.dumps([[]])}\n",
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual(
-            [
-                {
-                    "context": "required / large evidence",
-                    "app_id": 15368,
-                    "state": "success",
-                }
-            ],
-            json.loads(result.stdout),
-        )
 
     def test_collection_ci_concurrency_isolated_by_pr_and_exact_head(self) -> None:
         workflow = load_yaml(WORKFLOWS / "collection-ci.yml")

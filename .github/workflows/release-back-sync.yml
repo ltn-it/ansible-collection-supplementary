@@ -132,11 +132,12 @@ jobs:
             echo "::error::A stable semantic v-prefixed release tag is required."
             exit 1
           fi
-          python scripts/classify-security-release.py \
+          classification="$(bash scripts/wunder-devtools-ee.sh python3 -B scripts/classify-security-release.py \
             --event-kind version \
             --version "${TAG_INPUT#v}" \
             --evidence-id "$EVIDENCE_ID" \
-            --binding-root security-binding-base
+            --binding-root security-binding-base --github-output '')"
+          jq -r 'to_entries[] | "\(.key)=\(.value)"' <<<"$classification" >>"$GITHUB_OUTPUT"
 
   back-sync:
     name: Open release back-sync PR
@@ -201,16 +202,6 @@ jobs:
           path: back-sync-control-source
           persist-credentials: false
 
-      - name: Set up normal publication proof Python
-        if: needs.security-classification.outputs.normal-two-stage == 'true'
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
-        with:
-          python-version: "3.11"
-
-      - name: Install normal publication proof parser
-        if: needs.security-classification.outputs.normal-two-stage == 'true'
-        run: python -m pip install --disable-pip-version-check PyYAML==6.0.3
-
       - name: Open or update release back-sync PR
         env:
           GH_TOKEN: ${{ steps.release-app.outputs.token }}
@@ -269,11 +260,11 @@ jobs:
           test "$(git cat-file -t "$release_sha")" = commit
           git merge-base --is-ancestor "$release_sha" origin/main
 
-          tag_payload="$RUNNER_TEMP/release-back-sync-tag.txt"
+          tag_payload="$GITHUB_WORKSPACE/.normal-tag-payload.txt"
           git cat-file tag FETCH_HEAD > "$tag_payload"
-          tagger_identity="$(
-            TAG_PAYLOAD="$tag_payload" RELEASE_SHA="$release_sha" RELEASE_TAG="$tag" \
-              python - <<'PY'
+          tag_program="$GITHUB_WORKSPACE/.normal-tag-identity.py"
+          trap 'rm -f -- "$tag_program" "$tag_payload"' EXIT
+          cat >"$tag_program" <<'PY'
           import os
           import re
           from pathlib import Path
@@ -305,7 +296,11 @@ jobs:
               raise SystemExit("release tag annotation differs")
           print(f"{match.group('slug')}\t{match.group('id')}")
           PY
-          )"
+          tagger_identity="$(bash scripts/wunder-devtools-ee.sh bash -c '
+            set -euo pipefail
+            export TAG_PAYLOAD=/workspace/.normal-tag-payload.txt RELEASE_SHA="$1" RELEASE_TAG="$2"
+            python3 -I /workspace/.normal-tag-identity.py
+          ' release-tag "$release_sha" "$tag")"
           IFS=$'\t' read -r tagger_app_slug tagger_bot_id <<< "$tagger_identity"
           test -n "$tagger_app_slug"
           [[ "$tagger_bot_id" =~ ^[1-9][0-9]*$ ]]
@@ -319,18 +314,17 @@ jobs:
               .id == $bot_id and .login == $login and .type == "Bot"
             ' "$tagger_bot" >/dev/null
 
-          tagged_galaxy="$RUNNER_TEMP/release-back-sync-galaxy.yml"
+          tagged_galaxy="$GITHUB_WORKSPACE/.normal-tagged-galaxy.yml"
           git show "${release_sha}:galaxy.yml" > "$tagged_galaxy"
-          tagged_version="$(TAGGED_GALAXY="$tagged_galaxy" python - <<'PY'
-          import os
+          tagged_version="$(bash scripts/wunder-devtools-ee.sh python3 -I -c '
+          import sys
           import re
           from pathlib import Path
 
-          text = Path(os.environ["TAGGED_GALAXY"]).read_text(encoding="utf-8")
-          match = re.search(r"(?m)^version:\s*[\"']?([^\s\"']+)", text)
+          text = Path(sys.argv[1]).read_text(encoding="utf-8")
+          match = re.search(r"(?m)^version:\s*[\"'"'"']?([^\s\"'"'"']+)", text)
           print(match.group(1) if match else "")
-          PY
-          )"
+          ' /workspace/.normal-tagged-galaxy.yml)"
           test "$tag" = "v${tagged_version}"
           if [ "$SECURITY_RELEASE" = true ]; then
             test "$WORKFLOW_ACTOR" = 'lightning-it-release-automation[bot]'
@@ -383,10 +377,31 @@ jobs:
             read -r -a normal_release_parents <<<"$(git rev-list --parents -n 1 "$release_sha")"
             test "${#normal_release_parents[@]}" -eq 3
             proof="$RUNNER_TEMP/normal-back-sync-publication-proof.json"
-            python scripts/normal_release_proof.py baseline \
-              --root "$GITHUB_WORKSPACE" --control-root "$GITHUB_WORKSPACE/back-sync-control-source" \
-              --repository "$REPO" --repository-id "$GITHUB_REPOSITORY_ID" \
-              --base "$release_sha" >"$proof"
+            observations="$GITHUB_WORKSPACE/.normal-backsync-observations"
+            fresh="$GITHUB_WORKSPACE/.normal-backsync-fresh"
+            bash scripts/normal_release_observations.sh baseline "$observations" "$REPO" "$release_sha"
+            WUNDER_DEVTOOLS_NETWORK=bridge bash scripts/wunder-devtools-ee.sh bash -c '
+              set -euo pipefail
+              test -z "${GH_TOKEN:-}" && test -z "${GITHUB_TOKEN:-}"
+              unset GIT_DIR GIT_COMMON_DIR GIT_WORK_TREE
+            git -c safe.directory=/workspace clone --quiet --no-hardlinks --no-checkout /workspace "$HOME/release"
+              git -C "$HOME/release" checkout --quiet --detach "$1"
+              cp -a --no-preserve=ownership /workspace/back-sync-control-source "$HOME/control"
+              python3 -B /workspace/scripts/normal_release_proof.py baseline \
+                --root "$HOME/release" --control-root "$HOME/control" \
+                --repository "$2" --repository-id "$3" --base "$1" \
+                --observation-directory /workspace/.normal-backsync-observations
+            ' normal-backsync-proof "$release_sha" "$REPO" "$GITHUB_REPOSITORY_ID" >"$proof"
+            bash scripts/normal_release_observations.sh fresh "$fresh" "$REPO" "$release_sha" "$observations"
+            bash scripts/wunder-devtools-ee.sh bash -c '
+              set -euo pipefail
+              cp -a --no-preserve=ownership /workspace/back-sync-control-source "$HOME/control"
+              python3 -B /workspace/scripts/normal_release_proof.py freshness \
+                --root /workspace --base "$1" --control-root "$HOME/control" \
+                --repository "$2" --repository-id "$3" \
+                --observation-directory /workspace/.normal-backsync-observations \
+                --fresh-observation-directory /workspace/.normal-backsync-fresh
+            ' normal-backsync-freshness "$release_sha" "$REPO" "$GITHUB_REPOSITORY_ID"
             test "$(jq -er .main_merge "$proof")" = "$release_sha"
             test "$(jq -er .develop_merge "$proof")" = "${normal_release_parents[2]}"
             git merge-base --is-ancestor "${normal_release_parents[2]}" "$develop_tip"

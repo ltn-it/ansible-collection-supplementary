@@ -101,6 +101,12 @@ If generic guidance conflicts with repository behavior, you MUST prefer reposito
 
 ## 1.3 LI-219 Three-Pilot Adoption (2026-10-05)
 
+LTN-360 retires the inactive workflow files and their exclusive reconciler listed
+in `.lit/li259-supplementary-port.json` under `dormant_retirement`. The historical
+LI-219/LI-259 descriptions below do not authorize recreating those retired files.
+The surviving producer, current-revision helpers, consumed-review records and
+documented transition routes retain their existing checks and limits.
+
 This owner-authorized local adoption is restricted to `lightning-it/.github`,
 `lightning-it/shared-assets-lit`, and `lightning-it/ansible-collection-supplementary`.
 The event behavior requires the exact repository variable `LI219_EVENT_MODE=enabled`.
@@ -268,7 +274,10 @@ are preserved. Private administrative credentials never enter this repository.
    2. `CHANGELOG.rst`,
    3. legacy `CHANGELOG.md` files where they still exist.
 10. Generated changelog files and `galaxy.yml` version bumps are release-PR changes only.
-11. Release preparation MUST happen on `release/vX.Y.Z` branches and open a PR into `main`.
+11. Release preparation MUST happen on `release/vX.Y.Z` branches. Normal Supplementary preparation uses protected
+    Main tooling against the exact bound Develop data and opens its PR into `develop`; the subsequent ordinary
+    protected Develop-to-Main promotion supplies the release revision. The separately governed Security route
+    retains its direct-to-`main` preparation. Follow `RELEASE.md` for the required convergence and evidence steps.
 12. The release preparation workflow MAY automatically create that PR after a push to `main` when unreleased
     changelog fragments exist.
 13. Publishing happens only after the release PR is merged into `main`.
