@@ -17,6 +17,38 @@
       ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/../../roles/aap_local_execution/defaults/main.yml"
 
+    - name: Load AAP host preparation defaults for SELinux context coverage
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../../roles/aap_host_prepare/defaults/main.yml"
+
+    - name: Validate AAP host preparation prechecks before OS facts
+      ansible.builtin.include_tasks:
+        file: "{{ playbook_dir }}/../../roles/aap_host_prepare/tasks/assert.yml"
+
+    - name: Require the RHEL 9 Podman storage context
+      ansible.builtin.assert:
+        that:
+          - >-
+            aap_host_prepare_selinux_fcontexts
+            | selectattr('target', 'equalto', '/appl/podman(/.*)?')
+            | map(attribute='setype')
+            | first == 'container_file_t'
+        quiet: true
+      vars:
+        ansible_distribution_major_version: '9'
+
+    - name: Require the RHEL 10 Podman storage context
+      ansible.builtin.assert:
+        that:
+          - >-
+            aap_host_prepare_selinux_fcontexts
+            | selectattr('target', 'equalto', '/appl/podman(/.*)?')
+            | map(attribute='setype')
+            | first == 'container_var_lib_t'
+        quiet: true
+      vars:
+        ansible_distribution_major_version: '10'
+
     - name: Require the canonical host preparation action mapping
       ansible.builtin.assert:
         that:

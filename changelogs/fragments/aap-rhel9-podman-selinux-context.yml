@@ -1,0 +1,5 @@
+---
+bugfixes:
+  - >-
+    aap_host_prepare - use the RHEL 9 supported container_file_t context
+    for alternate Podman storage while retaining container_var_lib_t on RHEL 10.

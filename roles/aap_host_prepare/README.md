@@ -22,6 +22,9 @@ role. The calling runbook controls optional host changes through the existing
 `aap_host_prepare_selinux_manage` defaults to `true`. On SELinux-enabled
 hosts, the role persists and applies contexts for `/appl`, temporary paths,
 the alternate user-home hierarchy, and Podman storage before deployment.
+For `/appl/podman`, RHEL 9 uses `container_file_t` and RHEL 10 uses
+`container_var_lib_t`. Override `aap_host_prepare_selinux_podman_setype`
+if the target policy requires a different storage label.
 Customize `aap_host_prepare_selinux_fcontexts` and
 `aap_host_prepare_selinux_restore_paths` only when the application filesystem
 layout differs.

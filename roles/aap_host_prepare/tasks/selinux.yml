@@ -1,4 +1,12 @@
 ---
+- name: Validate the Podman storage SELinux type after gathering OS facts
+  ansible.builtin.assert:
+    that:
+      - aap_host_prepare_selinux_podman_setype is string
+      - aap_host_prepare_selinux_podman_setype | trim | length > 0
+    fail_msg: Invalid Podman storage SELinux type for this AAP host.
+    quiet: true
+
 - name: Install SELinux management tools for AAP paths
   ansible.builtin.package:
     name: policycoreutils-python-utils
