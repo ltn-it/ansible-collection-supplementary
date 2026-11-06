@@ -967,6 +967,10 @@ roles:
       - >-
         Tiny exercises real flow, provider, required-action and deferred-binding
         API lifecycle and idempotency; a complete upstream broker login remains unproven.
+      - >-
+        Direct realm-first reconciliation has offline task-shape regression coverage;
+        protected live realm creation and repeat-run idempotency remain pending for the
+        exact release candidate.
       - "Current scenarios do not prove deletion reconciliation for every managed object type."
       - "RHEL 9 and RHEL 10 remain candidate targets until the complete exact-commit matrix passes on approved images."
     deprecation_state: "active"

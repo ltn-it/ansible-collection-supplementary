@@ -1,5 +1,5 @@
 ---
-- name: Plan Keycloak realm reconciliation  # noqa args[module]
+- name: Reconcile Keycloak realms  # noqa args[module]
   community.general.keycloak_realm: >-
     {{
       keycloak_cac_realm_definition
@@ -16,45 +16,4 @@
   loop_control:
     loop_var: keycloak_cac_realm_definition
     label: "{{ keycloak_cac_realm_definition.realm | default('unnamed') }}"
-  check_mode: true
-  register: keycloak_cac_realm_plan
-  changed_when: false
-  no_log: true
-
-- name: Reconcile Keycloak realms  # noqa args[module]
-  community.general.keycloak_realm: >-
-    {{
-      keycloak_cac_realm_definition.keycloak_cac_realm_definition
-      | combine({
-          'auth_keycloak_url': keycloak_cac_url,
-          'auth_realm': keycloak_cac_realm,
-          'auth_username': keycloak_cac_admin_user,
-          'auth_password': keycloak_cac_admin_password,
-          'validate_certs': keycloak_cac_validate_certs,
-          'connection_timeout': keycloak_cac_request_timeout
-        })
-    }}
-  loop: "{{ keycloak_cac_realm_plan.results | default([]) }}"
-  loop_control:
-    loop_var: keycloak_cac_realm_definition
-    label: >-
-      {{
-        keycloak_cac_realm_definition.keycloak_cac_realm_definition.realm
-        | default('unnamed')
-      }}
-  when: >-
-    (
-      keycloak_cac_realm_definition.keycloak_cac_realm_definition.state
-      | default('present') == 'absent'
-      and keycloak_cac_realm_definition.existing | default({}) | length > 0
-    )
-    or
-    (
-      keycloak_cac_realm_definition.keycloak_cac_realm_definition.state
-      | default('present') == 'present'
-      and (
-        keycloak_cac_realm_definition.existing | default({})
-        | combine(keycloak_cac_realm_definition.proposed | default({}))
-      ) != (keycloak_cac_realm_definition.existing | default({}))
-    )
   no_log: true

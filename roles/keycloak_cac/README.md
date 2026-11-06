@@ -51,8 +51,8 @@ it does not by itself disable other account-linking routes.
 
 `keycloak_cac_realm_flow_bindings` contains only `realm` and `browser_flow`.
 Each realm must appear once as present in `keycloak_cac_realms`. Bindings run
-after flows, providers and required actions, reusing the existing realm
-plan/reconciliation path. Do not set a not-yet-created browser flow in the
+after flows, providers and required actions, reusing direct realm
+reconciliation. Do not set a not-yet-created browser flow in the
 initial realm definition. Removing a binding does not restore a default flow.
 Keep consumers disabled until the entire configuration is reconciled and
 verified; task ordering is not an atomic activation transaction.
