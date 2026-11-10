@@ -31,6 +31,8 @@ provisioner:
     host_vars:
       "${MOLECULE_TEST_INSTANCE:-atlas-observability-heavy-ct}":
         ansible_connection: community.general.incus
+        ansible_incus_remote: "${MOLECULE_INCUS_REMOTE:-local}"
+        ansible_incus_project: "${MOLECULE_INCUS_PROJECT:-default}"
         ansible_python_interpreter: /usr/bin/python3
   env:
     ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/roles:${HOME}/.ansible/roles:/usr/share/ansible/roles"

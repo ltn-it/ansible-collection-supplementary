@@ -76,6 +76,11 @@
         }},
         "owner_label": {{ molecule_incus_owner_label | to_json }},
         "exact_owner_match": true,
+        "transport": {
+          "mode": {{ molecule_incus_transport_facts.mode | to_json }},
+          "project": {{ molecule_incus_transport_facts.project | default('') | to_json }},
+          "binding_sha256": {{ molecule_incus_transport_facts.binding_sha256 | default('') | to_json }}
+        },
         "state": {{
           molecule_incus_evidence_instance_state.stdout
           | default('unknown', true) | trim | to_json
