@@ -263,6 +263,7 @@ def load_context(root, *, repository, run_id, attempt, now):
     )
     pin = hashlib.sha256(ssl.PEM_cert_to_DER_cert(certificate)).hexdigest()
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.check_hostname = False
     context.verify_mode = ssl.CERT_REQUIRED
     context.load_verify_locations(cadata=certificate)

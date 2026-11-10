@@ -303,6 +303,7 @@ class ContextTests(unittest.TestCase):
         binding, tls, digest = self.load()
         self.assertEqual(binding, self.binding)
         self.assertEqual(tls.context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertEqual(tls.context.minimum_version, ssl.TLSVersion.TLSv1_2)
         self.assertFalse(tls.context.check_hostname)
         self.assertEqual(
             tls.peer_sha256, hashlib.sha256(self.certificate.public_bytes(serialization.Encoding.DER)).hexdigest()
@@ -587,6 +588,7 @@ class ContextTests(unittest.TestCase):
 
         server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         if certificate is not None:
             self.write("alternate.crt", certificate.public_bytes(serialization.Encoding.PEM))
             self.write(
