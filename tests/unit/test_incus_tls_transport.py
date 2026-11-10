@@ -133,6 +133,69 @@ def responses():
 
 
 class CapacityTests(unittest.TestCase):
+    def test_new_vm_at_exact_root_quota_needs_state_volume_too(self):
+        data = responses()
+        with self.assertRaisesRegex(transport.Refused, "insufficient-project-quota"):
+            self.facts(data)
+        data["/1.0/projects/fixture-lease/state"]["resources"]["disk"]["Limit"] += 500 * 1024**2
+        self.assertEqual(self.facts(data)["plan"]["vm1"]["state"], "500MiB")
+        self.assertIsNone(self.facts(responses(), "container")["plan"]["vm1"]["state"])
+
+    @staticmethod
+    def facts(data, kind="vm", disk="24GiB"):
+        return transport.server_facts(
+            FixtureClient(data),
+            capacity=True,
+            runtime=runtime(),
+            owner=OWNER,
+            platforms={"vm1": kind},
+            requests={"vm1": {"cpu": "4", "memory": "12GiB", "disk": disk}},
+        )
+
+    def test_explicit_state_and_pool_capacity_are_independent(self):
+        data = responses()
+        data["/1.0/profiles/default"]["devices"]["root"]["size.state"] = "2GiB"
+        quotas = data["/1.0/projects/fixture-lease/state"]["resources"]
+        quotas["disk"]["Limit"] = 26 * GIB
+        quotas["disk.fixture-pool"] = {"Limit": 25 * GIB, "Usage": 0}
+        with self.assertRaisesRegex(transport.Refused, "insufficient-pool-project-quota"):
+            self.facts(data)
+        quotas["disk.fixture-pool"]["Limit"] += GIB
+        data["/1.0/storage-pools/fixture-pool/resources"]["space"]["used"] = 75 * GIB
+        with self.assertRaisesRegex(transport.Refused, "insufficient-storage-pool-space"):
+            self.facts(data)
+        data["/1.0/storage-pools/fixture-pool/resources"]["space"]["used"] -= GIB
+        self.assertEqual(self.facts(data)["plan"]["vm1"]["state"], "2GiB")
+
+    def test_explicit_malformed_state_does_not_fall_back(self):
+        for value in ("", False, "nonsense", "0B"):
+            with self.subTest(value=value):
+                data = responses()
+                data["/1.0/profiles/default"]["devices"]["root"]["size.state"] = value
+                with self.assertRaisesRegex(transport.Refused, "owned-allocation-schema"):
+                    self.facts(data)
+                self.assertIsNone(self.facts(data, "container")["plan"]["vm1"]["state"])
+
+    def test_owned_vm_growth_needs_only_new_root_bytes_and_no_physical_credit(self):
+        for status in ("Running", "Stopped"):
+            with self.subTest(status=status):
+                data = self.owned_data("vm", status, 12 * GIB)
+                quotas = data["/1.0/projects/fixture-lease/state"]["resources"]
+                quotas["disk"]["Limit"] += GIB
+                with self.assertRaisesRegex(transport.Refused, "vm-root-resize-state-unproven"):
+                    self.facts(data, disk="25GiB")
+                data["/1.0/instances/vm1"]["expanded_devices"]["root"]["size.state"] = "500MiB"
+                data["/1.0/storage-pools/fixture-pool/resources"]["space"]["used"] = 100 * GIB
+                self.assertFalse(self.facts(data)["plan"]["vm1"]["resize_root"])
+                with self.assertRaisesRegex(transport.Refused, "insufficient-storage-pool-space"):
+                    self.facts(data, disk="25GiB")
+                data["/1.0/storage-pools/fixture-pool/resources"]["space"]["used"] -= GIB
+                plan = self.facts(data, disk="25GiB")["plan"]["vm1"]
+                self.assertTrue(plan["resize_root"])
+                self.assertIsNone(plan["state"])
+                with self.assertRaisesRegex(transport.Refused, "vm-root-shrink-refused"):
+                    self.facts(data, disk="23GiB")
+
     @staticmethod
     def owned_data(kind, status, free_memory):
         data = responses()
@@ -142,8 +205,10 @@ class CapacityTests(unittest.TestCase):
             "name": "vm1",
             "type": "virtual-machine" if kind == "vm" else "container",
             "expanded_config": {"user.lit-molecule-owner": OWNER, "limits.cpu": "4", "limits.memory": "12GiB"},
-            "expanded_devices": {"root": {"type": "disk", "path": "/", "size": "24GiB"}},
+            "expanded_devices": {"root": {"type": "disk", "path": "/", "size": "24GiB", "pool": "fixture-pool"}},
         }
+        if kind == "vm":
+            data["/1.0/projects/fixture-lease/state"]["resources"]["disk"]["Limit"] += 500 * 1024**2
         if status is not None:
             data["/1.0/instances/vm1"]["status"] = status
         for row in data["/1.0/projects/fixture-lease/state"]["resources"].values():
@@ -155,11 +220,8 @@ class CapacityTests(unittest.TestCase):
             for status in ("Stopped", "Running", "Frozen", "Error", "Unknown", None):
                 with self.subTest(kind=kind, status=status):
                     data = self.owned_data(kind, status, 8 * GIB)
-                    facts = transport.server_facts(
-                        FixtureClient(data), capacity=True, runtime=runtime(), owner=OWNER, platforms={"vm1": kind}
-                    )
+                    facts = self.facts(data, kind)
                     self.assertEqual(8 * GIB, facts["available"]["memory"])
-                    self.assertEqual(12 * GIB, facts["own_existing_allocations"]["memory"])
 
     def test_real_create_preflight_enforces_free_ram_for_vm_and_container_restart_plans(self):
         tasks = yaml.safe_load((ROOT / "molecule/shared/incus/create.yml").read_text())[0]["tasks"]
@@ -174,9 +236,7 @@ class CapacityTests(unittest.TestCase):
                             data["/1.0/instances"] = []
                             for row in data["/1.0/projects/fixture-lease/state"]["resources"].values():
                                 row["Usage"] = 0
-                        facts = transport.server_facts(
-                            FixtureClient(data), capacity=True, runtime=runtime(), owner=OWNER, platforms={"vm1": kind}
-                        )
+                        facts = self.facts(data, kind)
                         gate_name = (
                             "Enforce authenticated remote resource observations and hard project quota headroom"
                             if mode == "tls"
@@ -204,12 +264,10 @@ class CapacityTests(unittest.TestCase):
                                     "molecule_incus_transport_facts": facts,
                                     "molecule_incus_available_cpu": {"stdout": "4"},
                                     "molecule_incus_available_memory": {"stdout": str(free_gib * GIB)},
-                                    "molecule_incus_available_disk": {"stdout_lines": ["Available", str(24 * GIB)]},
+                                    "molecule_incus_available_disk": {"stdout_lines": ["Available", str(25 * GIB)]},
                                     "expected_denied": free_gib < 12,
                                 },
                                 "tasks": [
-                                    copy.deepcopy(named["Initialize requested resource totals"]),
-                                    copy.deepcopy(named["Calculate requested resource totals"]),
                                     gate,
                                     {
                                         "name": "Verify actual preflight result",
@@ -217,7 +275,7 @@ class CapacityTests(unittest.TestCase):
                                             "that": [
                                                 "not capacity_gate.skipped | default(false)",
                                                 "capacity_gate.failed | default(false) == expected_denied",
-                                                "molecule_incus_requested_memory_total | int == 12884901888",
+                                                "molecule_incus_transport_facts.requested.memory | int == 12884901888",
                                             ]
                                         },
                                     },
@@ -244,25 +302,139 @@ class CapacityTests(unittest.TestCase):
             )
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
+    def test_actual_local_transport_and_atomic_init_use_the_same_resource_plan(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = Path(temporary)
+            (fixture / "helpers").mkdir()
+            shutil.copy2(HELPER, fixture / "helpers" / "tls_transport.py")
+            data = responses()
+            data["/1.0/projects/fixture-lease/state"]["resources"] = {
+                key: {"Limit": -1, "Usage": 0} for key in ("cpu", "memory", "disk")
+            }
+            (fixture / "responses.json").write_text(json.dumps(data))
+            executable = fixture / "incus"
+            executable.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, pathlib, sys\n"
+                "root = pathlib.Path(__file__).parent\n"
+                "args = sys.argv[1:]\n"
+                "with (root / 'calls.jsonl').open('a') as stream:\n"
+                "    stream.write(json.dumps(args) + '\\n')\n"
+                "if args == ['remote', 'get-default']:\n"
+                "    print('local')\n"
+                "elif args == ['project', 'get-current']:\n"
+                "    print('fixture-lease')\n"
+                "elif args[0] == 'query':\n"
+                "    path, project = args[1].split('?', 1)\n"
+                "    assert project == 'project=fixture-lease'\n"
+                "    print(json.dumps(json.loads((root / 'responses.json').read_text())[path]))\n"
+                "else:\n"
+                "    assert args[0] == 'init'\n"
+            )
+            executable.chmod(0o700)
+            shared = ROOT / "molecule/shared/incus"
+            create = {
+                task.get("name"): task for task in yaml.safe_load((shared / "create.yml").read_text())[0]["tasks"]
+            }
+            tasks = [
+                create["Initialize Incus platform resource inputs"],
+                create["Resolve Incus platform resource inputs"],
+                *yaml.safe_load((shared / "transport.yml").read_text()),
+                create["Initialize missing Incus instances with atomic owner labels and network attachment"],
+            ]
+            platforms = [{"name": kind, "type": kind, "image": "images:ubuntu/24.04"} for kind in ("vm", "container")]
+            variables = {
+                "molecule_incus_transport_require_capacity": True,
+                "molecule_incus_owner_effective": OWNER,
+                "molecule_incus_owner_label": "user.lit-molecule-owner",
+                "molecule_incus_network_effective": NETWORK,
+                "molecule_incus_identity_effective": {
+                    "repository": "example/repository",
+                    "run_id": "501",
+                    "attempt": "1",
+                    "scenario": "fixture",
+                    "target": "vm",
+                },
+                "molecule_incus_instances": platforms,
+                "molecule_incus_default_cpu": 2,
+                "molecule_incus_default_memory": "1GiB",
+                "molecule_incus_default_disk": "20GiB",
+                "molecule_incus_existing": {"results": [{"item": item, "rc": 1} for item in platforms]},
+            }
+            play = fixture / "create-resource-argv.yml"
+            play.write_text(
+                yaml.safe_dump(
+                    [
+                        {
+                            "hosts": "localhost",
+                            "connection": "local",
+                            "gather_facts": False,
+                            "vars": variables,
+                            "tasks": tasks,
+                        }
+                    ]
+                )
+            )
+            environment = dict(
+                os.environ,
+                ANSIBLE_HOME=str(fixture / "home"),
+                ANSIBLE_LOCAL_TEMP=str(fixture / "tmp"),
+                MOLECULE_INCUS_TRANSPORT="local",
+                PATH=str(fixture) + os.pathsep + os.environ["PATH"],
+            )
+            environment.pop("ANSIBLE_CONFIG", None)
+            ansible = shutil.which("ansible-playbook")
+            self.assertIsNotNone(ansible)
+
+            def run_play():
+                return subprocess.run(  # noqa: S603
+                    [ansible, "-i", "localhost,", str(play)],
+                    cwd=fixture,
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    check=False,
+                )
+
+            calls_path = fixture / "calls.jsonl"
+            result = run_play()
+            self.assertEqual(2, result.returncode, result.stdout + result.stderr)
+            self.assertIn("insufficient-storage-pool-space", result.stdout)
+            self.assertFalse(any(json.loads(line)[0] == "init" for line in calls_path.read_text().splitlines()))
+            data["/1.0/storage-pools/fixture-pool/resources"]["space"]["used"] -= 500 * 1024**2
+            (fixture / "responses.json").write_text(json.dumps(data))
+            calls_path.unlink()
+            result = run_play()
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            calls = [json.loads(line) for line in calls_path.read_text().splitlines()]
+            self.assertIn(["query", "/1.0/storage-pools/fixture-pool/resources?project=fixture-lease"], calls)
+            vm, container = [args for args in calls if args[0] == "init"]
+            self.assertEqual(["init", "images:ubuntu/24.04", "vm", "--vm"], vm[:4])
+            for args in (vm, container):
+                self.assertEqual(1, args.count("limits.cpu=2"))
+                self.assertEqual(1, args.count("limits.memory=1GiB"))
+                self.assertEqual(1, args.count("root,size=20GiB"))
+            self.assertEqual(1, vm.count("root,size.state=500MiB"))
+            self.assertNotIn("root,size.state=500MiB", container)
+
     def test_actual_server_shapes_bound_physical_observations_by_finite_quotas(self):
-        client = FixtureClient(responses())
-        facts = transport.server_facts(client, capacity=True, runtime=runtime(), owner=OWNER, platforms={"vm1": "vm"})
-        self.assertEqual(facts["available"], {"cpu": 4, "memory": 12 * GIB, "disk": 24 * GIB})
+        facts = self.facts(responses(), disk="20GiB")
+        self.assertEqual(facts["available"], {"cpu": 8, "memory": 56 * GIB})
         self.assertTrue(facts["declares_vm_driver"])
         self.assertFalse(facts["capacity_is_reservation"])
         self.assertNotIn("admission_verified", facts)
-        self.assertIn("/1.0/storage-pools/fixture-pool/resources", client.paths)
 
     def test_default_unlimited_project_or_missing_hard_quota_denies_before_creation(self):
         for value in (-1, 0, True, 1.5):
             data = responses()
             data["/1.0/projects/fixture-lease/state"]["resources"]["cpu"]["Limit"] = value
             with self.subTest(value=value), self.assertRaises(transport.Refused):
-                transport.server_facts(FixtureClient(data), capacity=True, runtime=runtime(), owner=OWNER)
+                self.facts(data)
         data = responses()
         data["/1.0"]["environment"]["project"] = "default"
         with self.assertRaises(transport.Refused):
-            transport.server_facts(FixtureClient(data), capacity=True, runtime=runtime(), owner=OWNER)
+            self.facts(data)
 
     def test_capture_and_destroy_do_not_require_unused_capacity(self):
         data = responses()
@@ -275,34 +447,18 @@ class CapacityTests(unittest.TestCase):
         self.assertIn("/1.0/networks/" + NETWORK, client.paths)
 
     def test_exact_owned_existing_allocations_allow_idempotent_same_vm_rerun(self):
-        data = responses()
+        data = self.owned_data("vm", "Stopped", 12 * GIB)
         data["/1.0/instances"] = ["/1.0/instances/vm1?project=fixture-lease"]
-        data["/1.0/instances/vm1"] = {
-            "name": "vm1",
-            "type": "virtual-machine",
-            "expanded_config": {"user.lit-molecule-owner": OWNER, "limits.cpu": "4", "limits.memory": "12GiB"},
-            "expanded_devices": {"root": {"type": "disk", "path": "/", "size": "24GiB"}},
-        }
-        for row in data["/1.0/projects/fixture-lease/state"]["resources"].values():
-            row["Usage"] = row["Limit"]
-        facts = transport.server_facts(
-            FixtureClient(data), capacity=True, runtime=runtime(), owner=OWNER, platforms={"vm1": "vm"}
-        )
-        self.assertEqual(facts["available"], {"cpu": 4, "memory": 12 * GIB, "disk": 24 * GIB})
-        self.assertEqual(facts["own_existing_allocations"]["memory"], 12 * GIB)
+        self.assertTrue(self.facts(data)["plan"]["vm1"]["present"])
         data["/1.0/instances/vm1"]["type"] = "container"
         with self.assertRaisesRegex(transport.Refused, "owned-instance-type-mismatch"):
-            transport.server_facts(
-                FixtureClient(data), capacity=True, runtime=runtime(), owner=OWNER, platforms={"vm1": "vm"}
-            )
+            self.facts(data)
 
     def test_foreign_instance_or_owner_gets_no_allocation_credit(self):
         data = responses()
         data["/1.0/instances"] = ["/1.0/instances/foreign?project=fixture-lease"]
         with self.assertRaisesRegex(transport.Refused, "foreign-instance-in-project"):
-            transport.server_facts(
-                FixtureClient(data), capacity=True, runtime=runtime(), owner=OWNER, platforms={"vm1": "vm"}
-            )
+            self.facts(data)
         data["/1.0/instances"] = ["/1.0/instances/vm1"]
         data["/1.0/instances/vm1"] = {
             "name": "vm1",
@@ -310,25 +466,21 @@ class CapacityTests(unittest.TestCase):
             "expanded_config": {"user.lit-molecule-owner": "foreign-owner"},
         }
         with self.assertRaisesRegex(transport.Refused, "foreign-instance-in-project"):
-            transport.server_facts(
-                FixtureClient(data), capacity=True, runtime=runtime(), owner=OWNER, platforms={"vm1": "vm"}
-            )
+            self.facts(data)
 
     def test_foreign_project_url_lowercase_or_malformed_resource_schema_denies(self):
         data = responses()
         data["/1.0/instances"] = ["/1.0/instances/vm1?project=foreign"]
         with self.assertRaises(transport.Refused):
-            transport.server_facts(
-                FixtureClient(data), capacity=True, runtime=runtime(), owner=OWNER, platforms={"vm1": "vm"}
-            )
+            self.facts(data)
         data = responses()
         data["/1.0/projects/fixture-lease/state"]["resources"]["cpu"] = {"limit": 4, "usage": 0}
         with self.assertRaises(transport.Refused):
-            transport.server_facts(FixtureClient(data), capacity=True, runtime=runtime(), owner=OWNER)
+            self.facts(data)
         data = responses()
         data["/1.0/resources"]["memory"]["used"] = 65 * GIB
         with self.assertRaises(transport.Refused):
-            transport.server_facts(FixtureClient(data), capacity=True, runtime=runtime(), owner=OWNER)
+            self.facts(data)
 
 
 class ContextTests(unittest.TestCase):
@@ -576,6 +728,8 @@ class ContextTests(unittest.TestCase):
             "--platforms",
             '[["vm1","vm"]]',
             "--capacity",
+            "--requests",
+            '{"vm1":{"cpu":"4","memory":"12GiB","disk":"20GiB"}}',
         ]
         base = responses()
         base["/1.0/networks/" + NETWORK]["used_by"] = ["/1.0/instances/vm1?project=fixture-lease"]

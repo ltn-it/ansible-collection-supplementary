@@ -143,21 +143,29 @@ identity model. Redirects, environment proxies and Unix-socket fallback are
 refused. The root handoff must still qualify the real private endpoint and
 certificate/project restrictions.
 
-Before create, the helper reads authenticated Incus server hardware, the bound
-project's resource state and default root-storage pool resources. The project
-must have finite positive CPU, memory and disk limits. Available values are the
-minimum of actual server/pool observations and project quota headroom. An
-idempotent rerun can credit only declared existing instances carrying this
-exact owner and the requested VM/container type; foreign resources receive no
-credit. Existing configured RAM counts only toward logical project quota reuse,
-never physical host headroom, regardless of instance state. Both local and TLS
-create require actual free RAM for the complete requested set before mutations:
-the lifecycle stops running instances for reconciliation and then starts them,
-so it does not retain a running guest without a new start. A planned future stop
-is not a physical-memory reservation or proof of freed RAM. These observations
-do not reserve capacity. The upstream root allocator
-must independently reserve the whole cell and account for other active leases
-and foreign workloads. The default unlimited project is refused.
+Before create, the helper plans resources from the selected Incus project,
+its default root device, owned instances and actual storage-pool usage. TLS
+requires finite positive CPU, memory and disk quotas. The plan checks both
+aggregate and any configured per-pool disk quota. A new VM needs its requested
+root disk **plus** its state filesystem: the root device's explicit state size,
+or 500 MiB by default on Incus 7.6. Containers do not have that VM state charge.
+The create request applies CPU, RAM, root size and VM state size together with
+the owner and network. This also works with a default profile that declares
+only the root device and its pool.
+
+An exact-owner rerun uses existing quota allocations for the same instance
+type, and checks new disk bytes against current pool headroom. It never adds
+configured disk sizes to physical free space or assumes another instance will
+shrink. A VM root cannot shrink; growth requires a verified explicit state
+size because Incus reapplies that state quota during root resizing. An unchanged
+legacy VM can still rerun without changing its state volume.
+
+Local and TLS create require actual free RAM for all requested guests before
+mutation: the lifecycle stops and restarts existing guests. A configured limit
+or future stop does not prove freed RAM. These observations are not reservations.
+The upstream root allocator must reserve the whole cell, including the VM state
+filesystem, and account for other leases and workloads. The default unlimited
+project is refused for TLS.
 
 Required API permissions are read-only server resources, the bound project and
 its state, its default profile, and selected storage-pool resources. Any missing

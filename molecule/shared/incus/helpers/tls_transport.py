@@ -1,11 +1,11 @@
-"""Read the fixed, upstream-admitted Incus TLS cell context and server facts.
+"""Read the admitted TLS cell context or plan local Incus resources.
 
 This client is not an issuer or an admission verifier. The root launcher must
 verify the compact admission JWS and its binding digest before starting the
 cell. Merely parsing that field here never establishes authorization. Resource
 figures are current observations bounded by hard project quotas, not host-wide
 reservations. Real VM start, agent readiness and functional assertions remain
-mandatory. No Unix socket, alternate endpoint, redirect, proxy or retry exists.
+mandatory. The TLS path has no alternate endpoint, redirect, proxy or retry.
 """
 
 # The closed JSON contract requires exact built-in types (not bool-as-int or
@@ -24,6 +24,7 @@ import os
 import re
 import ssl
 import stat
+import subprocess
 import sys
 import urllib.error
 import urllib.parse
@@ -377,14 +378,20 @@ def byte_size(value):
     return integer(int(match[1]) * powers[match[2]], "owned-allocation-schema")
 
 
-def owned_allocations(client, *, owner, platforms):
+VM_STATE_DEFAULT = "500MiB"  # Incus v7.6 project VM block filesystem default.
+
+
+def owned_allocations(client, *, owner, platforms, inventory=None, local=False):
     """Credit exact-owned logical quota allocations, never physical guest RAM.
 
     This is not ownership authority for a privileged root executor. The shared
     lifecycle independently rechecks owners immediately before mutation/delete.
     """
     urls = client.get("/1.0/instances", expected=list)
-    require(len(urls) <= 1000 and len(urls) == len(set(urls)), "project-instance-inventory")
+    require(
+        len(urls) <= 1000 and all(type(url) is str for url in urls) and len(urls) == len(set(urls)),
+        "project-instance-inventory",
+    )
     total = {"cpu": 0, "memory": 0, "disk": 0}
     for url in urls:
         require(type(url) is str, "project-instance-inventory")
@@ -399,6 +406,8 @@ def owned_allocations(client, *, owner, platforms):
         query = urllib.parse.parse_qs(parsed.query, strict_parsing=True) if parsed.query else {}
         require(query in ({}, {"project": [client.project]}), "project-instance-inventory")
         name = urllib.parse.unquote(parsed.path.removeprefix("/1.0/instances/"))
+        if local and name not in platforms:
+            continue
         require(name in platforms and "/" not in name, "foreign-instance-in-project")
         instance = client.get("/1.0/instances/" + urllib.parse.quote(name, safe=""))
         config, devices = instance.get("expanded_config"), instance.get("expanded_devices")
@@ -421,9 +430,18 @@ def owned_allocations(client, *, owner, platforms):
             and devices["root"].get("path") == "/",
             "owned-allocation-schema",
         )
-        total["cpu"] += integer(int(config["limits.cpu"]), "owned-allocation-schema")
-        total["memory"] += byte_size(config.get("limits.memory"))
-        total["disk"] += byte_size(devices["root"].get("size"))
+        root = devices["root"]
+        allocation = {
+            "cpu": integer(int(config["limits.cpu"]), "owned-allocation-schema"),
+            "memory": byte_size(config.get("limits.memory")),
+            "disk": byte_size(root.get("size")),
+        }
+        state = byte_size(root.get("size.state", VM_STATE_DEFAULT)) if platforms[name] == "vm" else 0
+        if inventory is not None:
+            inventory[name] = (allocation, state, root.get("pool"), "size.state" in root)
+        for key, value in allocation.items():
+            total[key] += value
+        total["disk"] += state
     return total
 
 
@@ -520,10 +538,10 @@ def inherited_bridge(client, *, owner, platforms, runtime):
         and len(users) == len(set(users)),
         "foreign-network-user",
     )
-    return network, pool, not settings, effective
+    return network, pool, not settings, effective, devices["root"]
 
 
-def server_facts(client, *, capacity, runtime, owner="", platforms=None):
+def server_facts(client, *, capacity, runtime, owner="", platforms=None, requests=None):
     server = client.get("/1.0")
     environment = server.get("environment")
     require(
@@ -541,7 +559,7 @@ def server_facts(client, *, capacity, runtime, owner="", platforms=None):
         "declares_vm_driver": "qemu" in environment["driver"].split(" | "),
         "firewall_controller": "incus",
     }
-    network, pool, redacted, effective = inherited_bridge(
+    network, pool, redacted, effective, root = inherited_bridge(
         client, owner=owner, platforms=platforms or {}, runtime=runtime
     )
     result.update(
@@ -560,46 +578,177 @@ def server_facts(client, *, capacity, runtime, owner="", platforms=None):
         type(extensions) is list and {"resources", "project_usage", "projects"} <= set(extensions),
         "remote-resource-api-required",
     )
-    resources = client.get("/1.0/resources")
-    state = client.get("/1.0/projects/" + urllib.parse.quote(client.project, safe="") + "/state")
-    quotas = state.get("resources")
-    require(type(quotas) is dict and {"cpu", "memory", "disk"} <= set(quotas), "project-hard-quota-required")
-    headroom = {key: quota_headroom(quotas[key]) for key in ("cpu", "memory", "disk")}
-    credit = owned_allocations(client, owner=owner, platforms=platforms or {})
-    require(all(credit[key] <= quotas[key]["Usage"] for key in credit), "owned-allocation-exceeds-project-usage")
-    storage = client.get("/1.0/storage-pools/" + urllib.parse.quote(pool, safe="") + "/resources")
-    try:
-        cpu = integer(resources["cpu"]["total"], "remote-cpu-schema")
-        memory_total = integer(resources["memory"]["total"], "remote-memory-schema")
-        memory_used = integer(resources["memory"]["used"], "remote-memory-schema")
-        disk_total = integer(storage["space"]["total"], "remote-storage-schema")
-        disk_used = integer(storage["space"]["used"], "remote-storage-schema")
-    except (KeyError, TypeError):
-        raise Refused("remote-resource-schema") from None
-    require(memory_used <= memory_total and disk_used <= disk_total, "remote-resource-schema")
-    result["available"] = {
-        "cpu": min(cpu, headroom["cpu"] + credit["cpu"]),
-        # Create reconciles instances through stop/configure/start. Configured
-        # guest limits are quota allocations, not RAM already freed on the host
-        # (even a running guest need not physically consume its full limit).
-        "memory": min(memory_total - memory_used, headroom["memory"] + credit["memory"]),
-        "disk": min(disk_total, disk_total - disk_used + credit["disk"], headroom["disk"] + credit["disk"]),
-    }
-    result["own_existing_allocations"] = credit
+    plan = capacity_plan(client, owner=owner, platforms=platforms or {}, requests=requests, root=root)
+    result["plan"] = plan["instances"]
+    result["requested"] = plan["requested"]
+    result["available"] = plan["available"]
     result["capacity_is_reservation"] = False
     return result
 
 
+def valid_pool(pool):
+    return type(pool) is str and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}", pool)
+
+
+def capacity_plan(client, *, owner, platforms, requests, root, local=False):
+    """Plan only positive quota changes; configured capacity is never physical credit."""
+    require(type(requests) is dict and requests.keys() == platforms.keys(), "requested-resources-schema")
+    require(type(root) is dict and root.get("type") == "disk" and root.get("path") == "/", "root-storage-required")
+    pool = root.get("pool")
+    require(valid_pool(pool), "root-storage-required")
+    inventory = {}
+    allocations = owned_allocations(client, owner=owner, platforms=platforms, inventory=inventory, local=local)
+    quotas = client.get("/1.0/projects/" + urllib.parse.quote(client.project, safe="") + "/state").get("resources")
+    require(type(quotas) is dict, "project-quota-schema")
+    headroom = {}
+    for key in ("cpu", "memory", "disk"):
+        row = quotas.get(key)
+        if local and (row is None or (type(row) is dict and row.get("Limit") == -1)):
+            continue
+        headroom[key] = quota_headroom(row)
+        require(allocations[key] <= row["Usage"], "owned-allocation-exceeds-project-usage")
+
+    changes = dict.fromkeys(("cpu", "memory", "disk"), 0)
+    requested = dict.fromkeys(changes, 0)
+    by_pool = {}
+    instances = {}
+    for name, kind in platforms.items():
+        req = requests[name]
+        require(type(req) is dict and set(req) == {"cpu", "memory", "disk"}, "requested-resources-schema")
+        require(type(req["cpu"]) is str and re.fullmatch(r"[1-9][0-9]{0,9}", req["cpu"]), "requested-resources-schema")
+        limits = {"cpu": int(req["cpu"]), "memory": byte_size(req["memory"]), "disk": byte_size(req["disk"])}
+        old, old_state, target_pool, explicit_state = inventory.get(name, ({}, 0, pool, False))
+        require(valid_pool(target_pool) and (local or target_pool == pool), "owned-root-storage-mismatch")
+        state = None
+        if kind == "vm":
+            if old:
+                require(limits["disk"] >= old["disk"], "vm-root-shrink-refused")
+                # Incus reapplies the state quota when resizing a VM root.
+                # For legacy implicit state the physical filesystem may have
+                # a volume-specific size which the expanded device cannot prove.
+                require(limits["disk"] == old["disk"] or explicit_state, "vm-root-resize-state-unproven")
+            else:
+                state = root.get("size.state", root.get("initial.size.state", VM_STATE_DEFAULT))
+                byte_size(state)
+        state_bytes = byte_size(state) if state is not None else 0
+        requested["disk"] += state_bytes + old_state
+        changes["disk"] += state_bytes
+        for key, value in limits.items():
+            requested[key] += value
+            changes[key] += max(0, value - old.get(key, 0))
+        by_pool[target_pool] = by_pool.get(target_pool, 0) + state_bytes + max(0, limits["disk"] - old.get("disk", 0))
+        instances[name] = {
+            "present": bool(old),
+            "resize_root": bool(old) and old["disk"] != limits["disk"],
+            "state": state,
+            **req,
+        }
+    require(all(changes[key] <= free for key, free in headroom.items()), "insufficient-project-quota")
+    for target_pool, growth in by_pool.items():
+        quota_key = "disk." + target_pool
+        if quota_key in quotas:
+            free = quota_headroom(quotas[quota_key])
+            observed = sum(old["disk"] + state for old, state, p, _ in inventory.values() if p == target_pool)
+            require(observed <= quotas[quota_key]["Usage"], "owned-allocation-exceeds-pool-usage")
+            require(growth <= free, "insufficient-pool-project-quota")
+        storage = client.get("/1.0/storage-pools/" + urllib.parse.quote(target_pool, safe="") + "/resources")
+        space = storage.get("space")
+        require(type(space) is dict, "storage-pool-resource-schema")
+        total = integer(space.get("total"), "storage-pool-resource-schema")
+        used = integer(space.get("used"), "storage-pool-resource-schema")
+        require(used <= total and growth <= total - used, "insufficient-storage-pool-space")
+
+    available = {}
+    if not local:
+        resources = client.get("/1.0/resources")
+        cpu, memory = resources.get("cpu"), resources.get("memory")
+        require(type(cpu) is dict and type(memory) is dict, "remote-resource-schema")
+        total = integer(memory.get("total"), "remote-memory-schema")
+        used = integer(memory.get("used"), "remote-memory-schema")
+        require(used <= total, "remote-memory-schema")
+        available = {"cpu": integer(cpu.get("total"), "remote-cpu-schema"), "memory": total - used}
+    return {"instances": instances, "requested": requested, "available": available}
+
+
+class LocalClient:
+    """Read the same CLI-selected project used by local lifecycle commands."""
+
+    def __init__(self):
+        require(self._run("remote", "get-default").strip() == b"local", "local-remote-binding")
+        self.project = self._run("project", "get-current").decode("ascii").strip()
+        require(valid_pool(self.project), "local-project-binding")
+        server = self.get("/1.0")
+        environment = server.get("environment")
+        require(
+            server.get("auth") == "trusted"
+            and type(environment) is dict
+            and environment.get("server") == "incus"
+            and environment.get("project") == self.project,
+            "local-server-binding",
+        )
+
+    @staticmethod
+    def _run(*args):
+        try:
+            # Fixed read-only CLI operations; no shell.
+            proc = subprocess.run(  # noqa: S603
+                ["incus", *args],  # noqa: S607
+                capture_output=True,
+                timeout=15,
+                check=True,
+            )
+        except (OSError, subprocess.SubprocessError):
+            raise Refused("local-resource-api-unavailable") from None
+        require(len(proc.stdout) <= MAX_REPLY, "local-resource-response-size")
+        return proc.stdout
+
+    def get(self, path, *, expected=dict):
+        # The raw query CLI does not attach the CLI-selected project.
+        raw = self._run("query", path + "?" + urllib.parse.urlencode({"project": self.project}))
+        value = json.loads(raw, object_pairs_hook=unique, parse_constant=reject_nonfinite)
+        require(type(value) is expected, "local-resource-response-type")
+        return value
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repository", required=True)
-    parser.add_argument("--run-id", required=True)
-    parser.add_argument("--attempt", required=True)
+    parser.add_argument("--repository")
+    parser.add_argument("--run-id")
+    parser.add_argument("--attempt")
     parser.add_argument("--owner", required=True)
     parser.add_argument("--platforms", required=True)
     parser.add_argument("--capacity", action="store_true")
+    parser.add_argument("--requests")
+    parser.add_argument("--local", action="store_true")
     args = parser.parse_args()
     try:
+        if args.local:
+            require(args.requests is not None, "requested-resources-schema")
+            platforms = json_object(args.platforms)
+            require(
+                0 < len(platforms) <= 1000
+                and all(
+                    re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}", name) and kind in ("vm", "container")
+                    for name, kind in platforms.items()
+                ),
+                "invalid-declared-platforms",
+            )
+            client = LocalClient()
+            devices = client.get("/1.0/profiles/default").get("devices")
+            require(type(devices) is dict, "root-storage-required")
+            root = devices.get("root")
+            plan = capacity_plan(
+                client,
+                owner=args.owner,
+                platforms=platforms,
+                requests=json_object(args.requests),
+                root=root,
+                local=True,
+            )
+            print(json.dumps({"plan": plan["instances"], "requested": plan["requested"]}))
+            return 0
+        require(all((args.repository, args.run_id, args.attempt)), "missing-tls-identity")
+        require(args.capacity == (args.requests is not None), "requested-resources-schema")
         require(os.environ.get("INCUS_CONF") == str(CONTEXT), "fixed-incus-context-required")
         require(
             not any(os.environ.get(name) for name in ("INCUS_REMOTE", "INCUS_PROJECT", "INCUS_SOCKET")),
@@ -634,13 +783,15 @@ def main():
             runtime=binding["runtime"],
             owner=args.owner,
             platforms=dict(platforms),
+            requests=json_object(args.requests) if args.requests else None,
         )
         result["binding_sha256"] = digest
         result["expires_at"] = binding["expires_at"]
         print(json.dumps(result, sort_keys=True))
     except Refused as error:
+        mode = "local" if args.local else "TLS"
         print(
-            "Incus TLS lifecycle preflight refused (" + str(error) + "); no automatic fallback or retry.",
+            f"Incus {mode} lifecycle preflight refused ({error}); no automatic fallback or retry.",
             file=sys.stderr,
         )
         return 2
