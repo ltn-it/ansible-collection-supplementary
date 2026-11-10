@@ -149,7 +149,13 @@ must have finite positive CPU, memory and disk limits. Available values are the
 minimum of actual server/pool observations and project quota headroom. An
 idempotent rerun can credit only declared existing instances carrying this
 exact owner and the requested VM/container type; foreign resources receive no
-credit. These observations do not reserve capacity. The upstream root allocator
+credit. Existing configured RAM counts only toward logical project quota reuse,
+never physical host headroom, regardless of instance state. Both local and TLS
+create require actual free RAM for the complete requested set before mutations:
+the lifecycle stops running instances for reconciliation and then starts them,
+so it does not retain a running guest without a new start. A planned future stop
+is not a physical-memory reservation or proof of freed RAM. These observations
+do not reserve capacity. The upstream root allocator
 must independently reserve the whole cell and account for other active leases
 and foreign workloads. The default unlimited project is refused.
 

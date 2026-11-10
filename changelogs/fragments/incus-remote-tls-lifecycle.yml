@@ -3,6 +3,8 @@ minor_changes:
   - Incus Molecule lifecycle - add an explicit pre-admitted TLS transport for the complete existing
     create, guest connection, evidence and destroy path, with pinned server identity and hard project quotas.
 bugfixes:
+  - Incus Molecule TLS preflight - retain exact-owned logical quota credit without adding configured guest RAM
+    to physical host headroom; every VM or container restart requires the complete requested RAM to be free.
   - Incus Molecule lifecycle - apply container UID-map isolation only to container targets when the same
     scenario selects a VM at runtime; retain other requested configuration and legacy container isolation.
   - Incus Molecule destroy - enumerate instance names as CSV before exact-owner checks instead of treating JSON lines

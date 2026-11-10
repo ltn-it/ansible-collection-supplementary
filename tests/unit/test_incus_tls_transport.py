@@ -11,7 +11,9 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import ssl
+import subprocess
 import sys
 import tempfile
 import threading
@@ -131,6 +133,117 @@ def responses():
 
 
 class CapacityTests(unittest.TestCase):
+    @staticmethod
+    def owned_data(kind, status, free_memory):
+        data = responses()
+        data["/1.0/resources"]["memory"]["used"] = 64 * GIB - free_memory
+        data["/1.0/instances"] = ["/1.0/instances/vm1"]
+        data["/1.0/instances/vm1"] = {
+            "name": "vm1",
+            "type": "virtual-machine" if kind == "vm" else "container",
+            "expanded_config": {"user.lit-molecule-owner": OWNER, "limits.cpu": "4", "limits.memory": "12GiB"},
+            "expanded_devices": {"root": {"type": "disk", "path": "/", "size": "24GiB"}},
+        }
+        if status is not None:
+            data["/1.0/instances/vm1"]["status"] = status
+        for row in data["/1.0/projects/fixture-lease/state"]["resources"].values():
+            row["Usage"] = row["Limit"]
+        return data
+
+    def test_owned_instance_ram_is_never_added_to_observed_physical_headroom(self):
+        for kind in ("vm", "container"):
+            for status in ("Stopped", "Running", "Frozen", "Error", "Unknown", None):
+                with self.subTest(kind=kind, status=status):
+                    data = self.owned_data(kind, status, 8 * GIB)
+                    facts = transport.server_facts(
+                        FixtureClient(data), capacity=True, runtime=runtime(), owner=OWNER, platforms={"vm1": kind}
+                    )
+                    self.assertEqual(8 * GIB, facts["available"]["memory"])
+                    self.assertEqual(12 * GIB, facts["own_existing_allocations"]["memory"])
+
+    def test_real_create_preflight_enforces_free_ram_for_vm_and_container_restart_plans(self):
+        tasks = yaml.safe_load((ROOT / "molecule/shared/incus/create.yml").read_text())[0]["tasks"]
+        named = {task["name"]: task for task in tasks if "name" in task}
+        plays = []
+        for kind in ("vm", "container"):
+            for mode in ("tls", "local"):
+                for status in ("Stopped", "Running", "Frozen", "Unknown", None, "missing"):
+                    for free_gib in (8, 12):
+                        data = self.owned_data(kind, status, free_gib * GIB)
+                        if status == "missing":
+                            data["/1.0/instances"] = []
+                            for row in data["/1.0/projects/fixture-lease/state"]["resources"].values():
+                                row["Usage"] = 0
+                        facts = transport.server_facts(
+                            FixtureClient(data), capacity=True, runtime=runtime(), owner=OWNER, platforms={"vm1": kind}
+                        )
+                        gate_name = (
+                            "Enforce authenticated remote resource observations and hard project quota headroom"
+                            if mode == "tls"
+                            else "Enforce Incus host resource prerequisites"
+                        )
+                        gate = copy.deepcopy(named[gate_name])
+                        # Only the fixture observes both expected denials and
+                        # successes. The production assertion remains unchanged.
+                        gate.update(register="capacity_gate", ignore_errors=True)
+                        plays.append(
+                            {
+                                "name": f"{mode} {kind} {status} free={free_gib}GiB",
+                                "hosts": "localhost",
+                                "connection": "local",
+                                "gather_facts": False,
+                                "vars": {
+                                    "molecule_incus_is_remote": mode == "tls",
+                                    "molecule_incus_instances": [
+                                        {
+                                            "name": "vm1",
+                                            "type": kind,
+                                            "resources": {"cpu": 4, "memory": "12GiB", "disk": "24GiB"},
+                                        }
+                                    ],
+                                    "molecule_incus_transport_facts": facts,
+                                    "molecule_incus_available_cpu": {"stdout": "4"},
+                                    "molecule_incus_available_memory": {"stdout": str(free_gib * GIB)},
+                                    "molecule_incus_available_disk": {"stdout_lines": ["Available", str(24 * GIB)]},
+                                    "expected_denied": free_gib < 12,
+                                },
+                                "tasks": [
+                                    copy.deepcopy(named["Initialize requested resource totals"]),
+                                    copy.deepcopy(named["Calculate requested resource totals"]),
+                                    gate,
+                                    {
+                                        "name": "Verify actual preflight result",
+                                        "ansible.builtin.assert": {
+                                            "that": [
+                                                "not capacity_gate.skipped | default(false)",
+                                                "capacity_gate.failed | default(false) == expected_denied",
+                                                "molecule_incus_requested_memory_total | int == 12884901888",
+                                            ]
+                                        },
+                                    },
+                                ],
+                            }
+                        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            playbook = root / "memory-preflight.yml"
+            playbook.write_text(yaml.safe_dump(plays))
+            environment = dict(os.environ, ANSIBLE_HOME=str(root / "home"), ANSIBLE_LOCAL_TEMP=str(root / "tmp"))
+            environment.pop("ANSIBLE_CONFIG", None)
+            ansible = shutil.which("ansible-playbook")
+            self.assertIsNotNone(ansible)
+            # Exact installed EE executable; only inert production assertions run.
+            result = subprocess.run(  # noqa: S603
+                [ansible, "-i", "localhost,", str(playbook)],
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
     def test_actual_server_shapes_bound_physical_observations_by_finite_quotas(self):
         client = FixtureClient(responses())
         facts = transport.server_facts(client, capacity=True, runtime=runtime(), owner=OWNER, platforms={"vm1": "vm"})

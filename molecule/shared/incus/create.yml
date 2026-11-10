@@ -320,6 +320,9 @@
       when: not molecule_incus_is_remote | bool
 
     - name: Enforce authenticated remote resource observations and hard project quota headroom
+      # Every create reconciles through stop/configure/start. Like the local
+      # MemAvailable gate, TLS requires actual free RAM for the full request;
+      # configured limits on existing guests are only logical quota credit.
       ansible.builtin.assert:
         that:
           - molecule_incus_transport_facts.available.cpu | int >= molecule_incus_requested_cpu_total | int

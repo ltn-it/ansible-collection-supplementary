@@ -378,7 +378,7 @@ def byte_size(value):
 
 
 def owned_allocations(client, *, owner, platforms):
-    """Credit only stable, declared, exact-owned allocations for rerun checks.
+    """Credit exact-owned logical quota allocations, never physical guest RAM.
 
     This is not ownership authority for a privileged root executor. The shared
     lifecycle independently rechecks owners immediately before mutation/delete.
@@ -579,9 +579,10 @@ def server_facts(client, *, capacity, runtime, owner="", platforms=None):
     require(memory_used <= memory_total and disk_used <= disk_total, "remote-resource-schema")
     result["available"] = {
         "cpu": min(cpu, headroom["cpu"] + credit["cpu"]),
-        "memory": min(
-            memory_total, memory_total - memory_used + credit["memory"], headroom["memory"] + credit["memory"]
-        ),
+        # Create reconciles instances through stop/configure/start. Configured
+        # guest limits are quota allocations, not RAM already freed on the host
+        # (even a running guest need not physically consume its full limit).
+        "memory": min(memory_total - memory_used, headroom["memory"] + credit["memory"]),
         "disk": min(disk_total, disk_total - disk_used + credit["disk"], headroom["disk"] + credit["disk"]),
     }
     result["own_existing_allocations"] = credit
