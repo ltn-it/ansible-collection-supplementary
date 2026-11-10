@@ -97,6 +97,7 @@ class IncusLifecycleTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
                 timeout=60,
+                check=False,
             )
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
             observed = [json.loads(line) for line in calls.read_text().splitlines()]

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Read the fixed, upstream-admitted Incus TLS cell context and server facts.
 
 This client is not an issuer or an admission verifier. The root launcher must
@@ -8,6 +7,10 @@ figures are current observations bounded by hard project quotas, not host-wide
 reservations. Real VM start, agent readiness and functional assertions remain
 mandatory. No Unix socket, alternate endpoint, redirect, proxy or retry exists.
 """
+
+# The closed JSON contract requires exact built-in types (not bool-as-int or
+# user-defined subclasses); isinstance would broaden this trust boundary.
+# pylint: disable=unidiomatic-typecheck
 
 from __future__ import annotations
 
@@ -53,11 +56,13 @@ def unique(pairs):
     return result
 
 
+def reject_nonfinite(_value):
+    raise Refused("nonfinite-number")
+
+
 def json_object(raw):
     try:
-        value = json.loads(
-            raw, object_pairs_hook=unique, parse_constant=lambda _: (_ for _ in ()).throw(Refused("nonfinite-number"))
-        )
+        value = json.loads(raw, object_pairs_hook=unique, parse_constant=reject_nonfinite)
     except (ValueError, TypeError, UnicodeError, RecursionError):
         raise Refused("invalid-json") from None
     require(type(value) is dict, "invalid-json-object")
@@ -291,11 +296,11 @@ class PinnedHandler(urllib.request.HTTPSHandler):
         self.tls = tls
         super().__init__(context=tls.context, check_hostname=False)
 
-    def https_open(self, request):
+    def https_open(self, req):
         def connection(host, **kwargs):
             return PinnedConnection(host, peer_sha256=self.tls.peer_sha256, **kwargs)
 
-        return self.do_open(connection, request, context=self.tls.context, check_hostname=False)
+        return self.do_open(connection, req, context=self.tls.context, check_hostname=False)
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):

@@ -68,7 +68,8 @@ class FixtureClient:
         if path not in self.responses:
             raise transport.Refused("fixture-resource-missing")
         value = copy.deepcopy(self.responses[path])
-        if type(value) is not expected:
+        if type(value) is not expected:  # pylint: disable=unidiomatic-typecheck
+            # Match the client's exact built-in schema, including bool/int separation.
             raise AssertionError("fixture response type differs from requested API schema")
         return value
 
@@ -612,7 +613,7 @@ class ContextTests(unittest.TestCase):
         return server, Handler
 
     def test_real_mutual_tls_ignores_proxy_and_requires_exact_peer_leaf_before_http(self):
-        _, tls, _ = self.load()
+        _binding, tls, _root = self.load()
         server, handler = self.serve()
         binding = dict(self.binding, server="https://127.0.0.1:" + str(server.server_port))
         with mock.patch.dict(os.environ, {"HTTPS_PROXY": "http://127.0.0.1:1", "HTTP_PROXY": "http://127.0.0.1:1"}):
@@ -623,7 +624,7 @@ class ContextTests(unittest.TestCase):
             client.get("/1.0?project=foreign")
 
     def test_valid_ca_but_different_peer_leaf_fails_before_http(self):
-        _, tls, _ = self.load()
+        _binding, tls, _root = self.load()
         server_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         server_subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "alternate-server.invalid")])
         alternate = (
@@ -668,7 +669,7 @@ class ContextTests(unittest.TestCase):
         self.assertEqual(handler.requests, [])
 
     def test_real_tls_redirect_is_not_followed(self):
-        _, tls, _ = self.load()
+        _binding, tls, _root = self.load()
         server, handler = self.serve(redirect=True)
         binding = dict(self.binding, server="https://127.0.0.1:" + str(server.server_port))
         with self.assertRaisesRegex(transport.Refused, "redirect-refused"):
