@@ -127,8 +127,8 @@ The fixed private context contains exactly `binding.json`, `config.yml`,
 `client.crt`, `client.key` and `servercerts/quality.crt`. Directories are owned by
 the cell UID with mode0700; files are owned, singly linked, ordinary0600 files.
 The separately typed legacy binding uses integer schema2 and the previous
-repository/run/attempt/server/project/expiry fields, plus exactly
-`runtime: {firewall_controller: incus}` and a compact `admission` JWS. The root
+repository/run/attempt/server/project/expiry fields, the [required runtime
+projection](#tls2-runtime-projection), and a compact `admission` JWS. The root
 launcher must cryptographically verify that JWS, its canonical binding digest
 and all context-file digests before candidate acquisition or cell startup.
 Syntactic JWS presence in this lifecycle reader is not admission evidence.
@@ -203,7 +203,9 @@ null, or non-mapping config is refused. A nonempty config must satisfy all owner
 subnet, DHCP/NAT/firewall/IPv6 and DNS checks and match the Root-signed facts.
 The lease client receives no default-project trust or edit permission.
 
-The admitted TLS2 binding therefore requires exactly these runtime fields:
+### TLS2 runtime projection
+
+The admitted TLS2 binding requires exactly these runtime fields:
 `firewall_controller`, `bridge`, and `storage_pool`. `firewall_controller` is
 `incus`; `bridge` contains exactly `name`, `project`, `owner`, `ipv4_address`,
 `dns_domain`, `dhcp`, `nat`, `firewall`, and `ipv6_address`. Its project is
