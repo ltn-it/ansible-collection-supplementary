@@ -10,3 +10,5 @@ bugfixes:
   - Incus Molecule TLS lifecycle - avoid local controller KVM/resource/firewall assumptions and blind network-create
     or readiness-start retries while retaining actual VM initialization, start, agent and network checks.
   - Incus Molecule TLS lifecycle - explicitly require TLS 1.2 or newer in the client and its mutual-TLS test server.
+  - Collection policy tests - run the complete discoverable unit suite in the pinned Devtools image with its
+    declared Incus and Vault dependencies, preserving the Vault runtime contract checks.
