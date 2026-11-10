@@ -648,7 +648,11 @@ def capacity_plan(client, *, owner, platforms, requests, root, local=False):
         quota_key = "disk." + target_pool
         if quota_key in quotas:
             free = quota_headroom(quotas[quota_key])
-            observed = sum(old["disk"] + state for old, state, p, _ in inventory.values() if p == target_pool)
+            observed = sum(
+                old["disk"] + state
+                for old, state, pool_name, _explicit_state in inventory.values()
+                if pool_name == target_pool
+            )
             require(observed <= quotas[quota_key]["Usage"], "owned-allocation-exceeds-pool-usage")
             require(growth <= free, "insufficient-pool-project-quota")
         storage = client.get("/1.0/storage-pools/" + urllib.parse.quote(target_pool, safe="") + "/resources")
