@@ -3,6 +3,8 @@ bugfixes:
   - >-
     Incus test lifecycle - detect the guest network interface before DHCP and static IPv4 configuration,
     supporting VM names such as ens3 while refusing missing or ambiguous interfaces.
+  - >-
+    Courier image updates - update the execution helper, workflow image, and shipped dependency inventory together.
 minor_changes:
   - >-
     Protected Main CI - run Heavy and Application Acceptance serially through the isolated physical-runner

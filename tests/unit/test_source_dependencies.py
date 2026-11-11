@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import shutil
 import tempfile
 import unittest
@@ -58,6 +59,58 @@ class SourceDependencyTests(unittest.TestCase):
         self.assertTrue(any("manifests" in pattern for pattern in patterns))
         self.assertTrue(any("roles/.*/defaults" in pattern for pattern in patterns))
         self.assertTrue(any("meta/source-dependencies" in pattern for pattern in patterns))
+
+    def test_renovate_keeps_courier_script_workflow_and_shipped_inventory_in_sync(self) -> None:
+        config = json.loads((ROOT / "renovate.json").read_text(encoding="utf-8"))
+        manager = next(
+            entry
+            for entry in config["customManagers"]
+            if entry["description"] == "Digest-pinned shipped role, test, and source-inventory images"
+        )
+        paths = (
+            "scripts/g06_courier/pull_image.py",
+            ".github/workflows/collection-ci.yml",
+            "meta/source-dependencies.yml",
+        )
+        patterns = [re.compile(pattern[1:-1]) for pattern in manager["managerFilePatterns"]]
+        expressions = [re.compile(re.sub(r"\(\?<([A-Za-z]+)>", r"(?P<\1>", value)) for value in manager["matchStrings"]]
+        package = "quay.io/l-it/ee-wunder-devtools-ubi9"
+        current = [
+            match
+            for expression in expressions
+            for match in expression.finditer((ROOT / paths[0]).read_text(encoding="utf-8"))
+            if match.group("depName") == package
+        ]
+        self.assertEqual(len(current), 1)
+        expected = current[0].group(0)
+        current_value = current[0].group("currentValue")
+        next_digest = "2" * 64 if current[0].group("currentDigest") == "sha256:" + "1" * 64 else "1" * 64
+        replacement = package + ":v999.0.0@sha256:" + next_digest
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._copy_source(root)
+            workflow = root / paths[1]
+            workflow.parent.mkdir(parents=True)
+            shutil.copy2(ROOT / paths[1], workflow)
+            for name in paths:
+                with self.subTest(path=name):
+                    self.assertTrue(any(pattern.search(name) for pattern in patterns))
+                    path = root / name
+                    contents = path.read_text(encoding="utf-8")
+                    matches = [
+                        match
+                        for expression in expressions
+                        for match in expression.finditer(contents)
+                        if match.group("depName") == package and match.group("currentValue") == current_value
+                    ]
+                    self.assertEqual(len(matches), 1)
+                    match = matches[0]
+                    self.assertEqual(match.group(0), expected)
+                    path.write_text(contents[: match.start()] + replacement + contents[match.end() :], encoding="utf-8")
+                    self.assertNotIn(expected, path.read_text(encoding="utf-8"))
+            self.assertEqual(DEPENDENCIES.validate_source_dependencies(root=root)["container_count"], 31)
+            self.assertIn(replacement, (root / paths[0]).read_text())
+            self.assertIn(replacement, workflow.read_text())
 
     def test_mutable_image_and_stale_inventory_are_rejected(self) -> None:
         for case in ("mutable-source", "stale-inventory"):
