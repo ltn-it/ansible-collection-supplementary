@@ -2,9 +2,11 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
+from urllib.parse import urlsplit
 
 IMAGE = "quay.io/l-it/ee-wunder-devtools-ubi9:v1.18.2@sha256:58955457d3410706520f34fa7ea9823d5650aa4844c562cd5c0107024d825711"  # noqa: E501 -- Keep the immutable image visible to source inventory.
 
@@ -12,6 +14,33 @@ IMAGE = "quay.io/l-it/ee-wunder-devtools-ubi9:v1.18.2@sha256:58955457d3410706520
 def need(ok, reason):
     if not ok:
         raise ValueError(reason)
+
+
+def retryable_registry_eof(raw):
+    message = raw.decode("utf-8", "replace").lower()
+    if any(word in message for word in ("unauthorized", "forbidden", "access denied", "not found")):
+        return False
+    # Match the observed Docker short-read diagnostic for the fixed image.
+    short_read = re.compile(r"(?:docker: )?short read: expected [0-9]+ bytes but got [0-9]+: unexpected eof")
+    observed_short_read = any(short_read.fullmatch(line.strip()) for line in message.splitlines())
+    addresses = re.findall(r"https?://[^\s\"']+", message)
+    if not addresses:
+        return observed_short_read
+    try:
+        for address in addresses:
+            parsed = urlsplit(address)
+            if (
+                parsed.scheme != "https"
+                or parsed.hostname != "quay.io"
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.port not in (None, 443)
+            ):
+                return False
+    except ValueError:
+        return False
+    endings = ("unexpected eof", "tls handshake: eof", "tls handshake eof", ": eof")
+    return any(line.strip().rstrip('"').endswith(endings) for line in message.splitlines())
 
 
 def prepare():
@@ -32,13 +61,7 @@ def prepare():
         if result.returncode == 0:
             print(json.dumps({"state": "PINNED_COURIER_EE_PREPULLED", "attempts": attempt}))
             return
-        message = result.stdout.decode("utf-8", "replace").lower()
-        known_eof = "quay.io" in message and (
-            "unexpected eof" in message
-            or "tls handshake: eof" in message
-            or "tls handshake eof" in message
-            or '": eof' in message
-        )
+        known_eof = retryable_registry_eof(result.stdout)
         need(known_eof and attempt < 3, "courier-ee-pull-unknown-or-exhausted")
         remaining = deadline - time.monotonic()
         need(remaining > 1, "courier-ee-pull-deadline")

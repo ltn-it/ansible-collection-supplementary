@@ -177,6 +177,31 @@ class PullDeadline(unittest.TestCase):
             self.assertLessEqual(call.kwargs["timeout"], 600)
             self.assertNotIn("GITHUB_TOKEN", call.kwargs["env"])
 
+    def test_observed_short_read_and_exact_registry_host_are_the_only_retryable_diagnostics(self):
+        self.assertTrue(
+            pull_image.retryable_registry_eof(
+                b"docker: short read: expected 35663573 bytes but got 29360128: unexpected EOF\n"
+            )
+        )
+        self.assertTrue(pull_image.retryable_registry_eof(b'Get "https://quay.io/v2/": unexpected EOF'))
+        for address in (
+            "https://evil.invalid/quay.io/v2/",
+            "https://quay.io.evil.invalid/v2/",
+            "https://quay.io@evil.invalid/v2/",
+            "http://quay.io/v2/",
+            "https://quay.io:444/v2/",
+        ):
+            with self.subTest(address=address):
+                self.assertFalse(pull_image.retryable_registry_eof(f"Get {address}: unexpected EOF".encode()))
+        self.assertFalse(
+            pull_image.retryable_registry_eof(
+                b"docker: short read: expected 12 bytes but got 1: unexpected EOF\n"
+                b"Get https://evil.invalid/quay.io/v2/: unexpected EOF"
+            )
+        )
+        self.assertFalse(pull_image.retryable_registry_eof(b"quay.io unexpected EOF"))
+        self.assertFalse(pull_image.retryable_registry_eof(b'Get "https://quay.io/v2/": unauthorized unexpected EOF'))
+
     def test_authentication_or_unknown_failure_never_retries(self):
         with (
             patch.dict(os.environ, {"PATH": "/usr/bin", "RUNNER_TEMP": "/fixture/runner-temp"}, clear=True),
