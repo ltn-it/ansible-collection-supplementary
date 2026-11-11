@@ -34,6 +34,8 @@
     that:
       - postgres_backup_restore_schedule_state in ['present', 'absent']
       - postgres_backup_restore_schedule_enabled is boolean
+      - postgres_backup_restore_schedule_backend in ['systemd', 'cron']
+      - postgres_backup_restore_schedule_cron_file == postgres_backup_restore_schedule_unit
       - postgres_backup_restore_schedule_instance is match('^[A-Za-z_][A-Za-z0-9_-]{0,62}$')
       - postgres_backup_restore_schedule_user is match('^[A-Za-z_][A-Za-z0-9_-]{0,31}$')
       - postgres_backup_restore_schedule_group is match('^[A-Za-z_][A-Za-z0-9_-]{0,31}$')
@@ -43,17 +45,32 @@
       - >-
         postgres_backup_restore_schedule_unit ==
         'postgres-backup-' ~ postgres_backup_restore_schedule_instance
-      - >-
-        postgres_backup_restore_schedule_worker ==
-        '/usr/local/libexec/lit-postgres-backup-' ~ postgres_backup_restore_schedule_instance ~ '.py'
+      - postgres_backup_restore_schedule_worker is match('^/usr/local/libexec/postgres-backup(-[A-Za-z0-9_-]+)?\.py$')
       - >-
         postgres_backup_restore_schedule_config ==
-        '/etc/lit-postgres-backup/' ~ postgres_backup_restore_schedule_instance ~ '.json'
+        '/etc/postgres-backup/' ~ postgres_backup_restore_schedule_instance ~ '.json'
       - >-
         postgres_backup_restore_schedule_unit_dir ==
         postgres_backup_restore_schedule_home ~ '/.config/systemd/user'
     fail_msg: Scheduled backups require an explicit existing non-root application account and instance.
   when: postgres_backup_restore_action == 'schedule'
+  tags: always
+
+- name: Validate the daily PostgreSQL cron schedule
+  ansible.builtin.assert:
+    that:
+      - postgres_backup_restore_schedule_cron_hour is integer
+      - postgres_backup_restore_schedule_cron_hour >= 0
+      - postgres_backup_restore_schedule_cron_hour <= 23
+      - postgres_backup_restore_schedule_cron_minute is integer
+      - postgres_backup_restore_schedule_cron_minute >= 0
+      - postgres_backup_restore_schedule_cron_minute <= 59
+      - postgres_backup_restore_schedule_cron_timezone is match('^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$')
+    fail_msg: Cron requires a valid daily hour, minute and explicit timezone name.
+  when:
+    - postgres_backup_restore_action == 'schedule'
+    - postgres_backup_restore_schedule_backend == 'cron'
+    - postgres_backup_restore_schedule_state == 'present'
   tags: always
 
 - name: Validate scheduled PostgreSQL backup settings
@@ -104,6 +121,26 @@
       - "'\r' not in item"
     fail_msg: Calendar entries must each be one non-empty systemd calendar line.
   loop: "{{ postgres_backup_restore_schedule_calendar }}"
+  when:
+    - postgres_backup_restore_action == 'schedule'
+    - postgres_backup_restore_schedule_state == 'present'
+  tags: always
+
+- name: Validate optional scheduled backup log capture inputs
+  ansible.builtin.assert:
+    that:
+      - postgres_backup_restore_schedule_log_config is string
+      - postgres_backup_restore_schedule_log_worker is string
+      - >-
+        postgres_backup_restore_schedule_log_config == '' or
+        postgres_backup_restore_schedule_log_config is
+        match('^/etc/podman-component-logs/[A-Za-z0-9][A-Za-z0-9_.-]*\.json$')
+      - >-
+        postgres_backup_restore_schedule_log_config == '' or
+        postgres_backup_restore_schedule_log_worker is
+        match('^/usr/local/libexec/[A-Za-z0-9_-]+/main\.py$')
+    fail_msg: Log capture requires an existing instance policy and shared component-log entry point.
+    quiet: true
   when:
     - postgres_backup_restore_action == 'schedule'
     - postgres_backup_restore_schedule_state == 'present'

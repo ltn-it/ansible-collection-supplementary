@@ -2,7 +2,7 @@
 
 Back up and restore PostgreSQL databases. One-shot operations stay disabled unless
 `postgres_backup_restore_execute=true`. The opt-in `schedule` action manages a
-rootless Podman backup worker and user systemd timer.
+rootless Podman backup worker with a user systemd timer or daily cron trigger.
 
 The role is **experimental**. [Role coverage](../../meta/role-coverage.yml) owns
 platform and Tiny/Heavy/Application Acceptance dispositions. Fixture tests alone
@@ -39,18 +39,45 @@ and `container_name` inputs. All scheduling inputs have the full
 `postgres_backup_restore_schedule_` prefix:
 
 - `instance`: unique safe identifier.
+- `worker`: shared implementation path, default `/usr/local/libexec/postgres-backup.py`.
+  Set `/usr/local/libexec/postgres-backup-keycloak.py` for Keycloak consumers;
+  keep that path identical across hosts. Services, settings and schedules remain
+  instance-specific. All consumers of a shared worker must use the same version.
 - `user`, `group`, `uid`, `home`: exact prepared application-account mapping.
 - `pgdata_dir`, `pgdata_mount`: expected host bind source and container destination.
 - `image`: exact existing image reference with `@sha256:`.
 - `source_revision`: full source commit of the installed collection.
+- `backend`: `systemd` (default) or `cron`; both start the same user service.
 - `calendar`: systemd calendars including the intended timezone.
+- `cron_hour`, `cron_minute`: daily cron start time as integers (0–23 and 0–59).
+- `cron_timezone`: explicit zoneinfo name, default `UTC`; no host timezone change.
 - `retention_days`: completed scheduled-set age, default 14 days.
 - `min_free_percent`: reserve checked before and during streaming, default 20.
 - `timeout_seconds`: total command deadline, default 1800 seconds.
 - `max_age_seconds`: local snapshot-age threshold for the status check.
 - `after`: optional service ordering; never starts a stopped database.
-- `enabled`: timer enable/start gate, default `false`.
+- `enabled`: schedule enable gate, default `false`.
 - `state`: `present` or `absent`; removal preserves all backup sets.
+- `log_config`: optional existing `/etc/podman-component-logs/<component>.json`
+  policy. Empty by default. When supplied, the scheduled service captures its
+  operational stdout/stderr into that component's bounded operational log.
+- `log_worker`: existing shared component-log entry point, default
+  `/usr/local/libexec/podman-component-logs/main.py`. The backup worker and its
+  instance-specific settings remain separate and unchanged.
+
+The optional log policy must already be installed and validated by its owning
+automation, for example `lit.rhel.podman_log_config`. This role verifies protected
+root-owned regular helper/config files, matching runtime UID and database
+container, operational capture enabled and log paths disjoint from both database
+data and backups. It does not install or trust a log helper. Native log size,
+rotation, archive count/age/bytes and the collector's persistent service are the
+policy producer's responsibility. The backup service explicitly uses
+`KillMode=control-group` so deactivation also contains worker descendants. A log
+capture error fails the service instead of silently running an unlogged backup.
+The same command with `--capture` can wrap an authorized fixed-marker restore
+worker; enabling this schedule input does not alter independent manual restore
+procedures or prove their operational logging. Never route a database dump stream
+or restored SQL into the operational log.
 
 Scheduled sets contain the entire selected database, role definitions **without
 passwords**, an immutable manifest and SHA-256 checksums. Role definitions are
@@ -81,6 +108,15 @@ whole-host recovery implementation in this role.
 
 Scheduling introduces no new collection dependency. Prepared Podman, Python,
 systemd user management and PostgreSQL clients are runtime prerequisites.
+The cron backend additionally requires an already running Cronie `crond.service`
+with `CRON_TZ` support. It installs an instance-specific root-owned file under
+`/etc/cron.d/` and disables the corresponding systemd timer. Switching to systemd
+removes that cron file before enabling the timer. Cron does not catch up missed
+runs after downtime; monitor the worker's snapshot age with `--status`.
+The cron trigger starts the user service and sends no cron email. Without an
+explicit log policy, worker diagnostics go to the existing journal. With capture
+enabled they go to the shared component log; only service/collector diagnostics
+remain in the platform journal. This role does not set a journal retention quota.
 External backup and monitoring integration remain separate consumers.
 
 ## Example Playbook
@@ -126,10 +162,10 @@ restore point. The status command reads metadata only.
 set -euo pipefail
 test "$(id -u)" -ne 0
 test -n "$BACKUP_INSTANCE"
-python3 "/usr/local/libexec/lit-postgres-backup-$BACKUP_INSTANCE.py" \
-  --config "/etc/lit-postgres-backup/$BACKUP_INSTANCE.json" --run --kind manual
-python3 "/usr/local/libexec/lit-postgres-backup-$BACKUP_INSTANCE.py" \
-  --config "/etc/lit-postgres-backup/$BACKUP_INSTANCE.json" --status
+python3 /usr/local/libexec/postgres-backup.py \
+  --config "/etc/postgres-backup/$BACKUP_INSTANCE.json" --run --kind manual
+python3 /usr/local/libexec/postgres-backup.py \
+  --config "/etc/postgres-backup/$BACKUP_INSTANCE.json" --status
 ~~~
 
 `--verify-set SET_ID` checks all saved file checksums. `--status` measures the
@@ -138,7 +174,8 @@ latest attempt. It does not certify an external copy. Success markers are
 `BACKUP_COMPLETED`, `BACKUP_SET_VERIFIED` and `BACKUP_STATUS_OK`.
 
 For rollback, set `postgres_backup_restore_schedule_state=absent`. Only the
-instance's timer, service, worker and settings are removed. An active backup is
+instance's cron trigger, timer, service and settings are removed. The shared
+worker is retained for other instances. An active backup is
 not killed: the timer is disabled and removal stops safely until that operation
 finishes. Repeating removal is idempotent. Backup data always remains.
 

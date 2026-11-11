@@ -13,8 +13,21 @@
       - "{{ postgres_backup_restore_schedule_unit_dir }}"
       - "{{ postgres_backup_restore_schedule_worker }}"
       - "{{ postgres_backup_restore_schedule_config }}"
+      - >-
+        {{ postgres_backup_restore_schedule_log_worker
+           if postgres_backup_restore_schedule_log_config | length > 0 else
+           postgres_backup_restore_schedule_worker }}
+      - >-
+        {{ postgres_backup_restore_schedule_log_config
+           if postgres_backup_restore_schedule_log_config | length > 0 else
+           postgres_backup_restore_schedule_config }}
+      - "/etc/cron.d/{{ postgres_backup_restore_schedule_cron_file }}"
   changed_when: false
   check_mode: false
+
+- name: Verify optional prepared scheduled-backup log capture
+  ansible.builtin.include_tasks: schedule_log_capture.yml
+  when: postgres_backup_restore_schedule_log_config | length > 0
 
 - name: Validate PostgreSQL backup calendars with systemd
   ansible.builtin.command:
@@ -22,6 +35,28 @@
   loop: "{{ postgres_backup_restore_schedule_calendar }}"
   changed_when: false
   check_mode: false
+  when: postgres_backup_restore_schedule_backend == 'systemd'
+
+- name: Verify the prepared cron daemon is running
+  ansible.builtin.command:
+    argv: [systemctl, is-active, crond.service]
+  changed_when: false
+  check_mode: false
+  when: postgres_backup_restore_schedule_backend == 'cron'
+
+- name: Verify the PostgreSQL backup cron timezone exists
+  ansible.builtin.stat:
+    path: "/usr/share/zoneinfo/{{ postgres_backup_restore_schedule_cron_timezone }}"
+    follow: true
+  register: postgres_backup_restore_schedule_cron_zone
+  when: postgres_backup_restore_schedule_backend == 'cron'
+
+- name: Reject unknown PostgreSQL backup cron timezones
+  ansible.builtin.assert:
+    that:
+      - postgres_backup_restore_schedule_cron_zone.stat.exists
+      - postgres_backup_restore_schedule_cron_zone.stat.isreg | default(false)
+  when: postgres_backup_restore_schedule_backend == 'cron'
 
 - name: Inspect prepared PostgreSQL backup paths
   ansible.builtin.stat:
@@ -110,7 +145,7 @@
     follow: false
   loop:
     - /usr/local/libexec
-    - /etc/lit-postgres-backup
+    - /etc/postgres-backup
   register: postgres_backup_restore_schedule_implementation_dirs
 
 - name: Validate existing PostgreSQL backup implementation directories
@@ -133,7 +168,7 @@
   loop: "{{ postgres_backup_restore_schedule_implementation_dirs.results }}"
   when: not item.stat.exists
 
-- name: Install the instance-specific PostgreSQL backup worker
+- name: Install the shared PostgreSQL backup worker
   ansible.builtin.copy:
     src: scheduled_backup.py
     dest: "{{ postgres_backup_restore_schedule_worker }}"
@@ -169,13 +204,32 @@
 - name: Apply pending PostgreSQL backup user-unit reloads before managing the timer
   ansible.builtin.meta: flush_handlers
 
+- name: Remove the inactive PostgreSQL backup cron trigger
+  ansible.builtin.file:
+    path: "/etc/cron.d/{{ postgres_backup_restore_schedule_cron_file }}"
+    state: absent
+  when: postgres_backup_restore_schedule_backend != 'cron' or not postgres_backup_restore_schedule_enabled
+
 - name: Reconcile the PostgreSQL backup timer
   ansible.builtin.systemd_service:
     name: "{{ postgres_backup_restore_schedule_unit }}.timer"
     scope: user
-    enabled: "{{ postgres_backup_restore_schedule_enabled }}"
-    state: "{{ 'started' if postgres_backup_restore_schedule_enabled else 'stopped' }}"
+    enabled: "{{ postgres_backup_restore_schedule_enabled and postgres_backup_restore_schedule_backend == 'systemd' }}"
+    state: >-
+      {{ 'started' if postgres_backup_restore_schedule_enabled and
+         postgres_backup_restore_schedule_backend == 'systemd' else 'stopped' }}
   become: true
   become_user: "{{ postgres_backup_restore_schedule_user }}"
   environment: "{{ postgres_backup_restore_schedule_environment }}"
   when: not ansible_check_mode
+
+- name: Install the daily PostgreSQL backup cron trigger
+  ansible.builtin.template:
+    src: scheduled-backup.cron.j2
+    dest: "/etc/cron.d/{{ postgres_backup_restore_schedule_cron_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - postgres_backup_restore_schedule_backend == 'cron'
+    - postgres_backup_restore_schedule_enabled

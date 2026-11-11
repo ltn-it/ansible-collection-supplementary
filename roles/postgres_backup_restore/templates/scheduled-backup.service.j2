@@ -12,7 +12,12 @@ Environment=XDG_RUNTIME_DIR=/run/user/{{ postgres_backup_restore_schedule_uid }}
 Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ postgres_backup_restore_schedule_uid }}/bus
 UMask=0077
 NoNewPrivileges=true
+KillMode=control-group
 TimeoutStartSec={{ (postgres_backup_restore_schedule_timeout_seconds | int) + 60 }}
+{% if postgres_backup_restore_schedule_log_config | length > 0 %}
+ExecStart={{ postgres_backup_restore_schedule_python_binary }} -B {{ postgres_backup_restore_schedule_log_worker }} --config {{ postgres_backup_restore_schedule_log_config }} --capture {{ postgres_backup_restore_schedule_python_binary }} {{ postgres_backup_restore_schedule_worker }} --config {{ postgres_backup_restore_schedule_config }} --run --kind scheduled
+{% else %}
 ExecStart={{ postgres_backup_restore_schedule_python_binary }} {{ postgres_backup_restore_schedule_worker }} --config {{ postgres_backup_restore_schedule_config }} --run --kind scheduled
+{% endif %}
 StandardOutput=journal
 StandardError=journal

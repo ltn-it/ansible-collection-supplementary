@@ -1628,6 +1628,10 @@ roles:
       - "Keycloak Heavy proves exact restoration of an isolated probe table, not whole-database disaster recovery."
       - "Scheduled rootless backups require an existing user manager, pinned container and local socket access."
       - "Scheduled backups do not configure external transport, alert delivery, WAL archival or host recovery."
+      - "A shared backup worker is retained on instance removal; all its consumers must use the same version."
+      - >-
+        Optional scheduled-log capture consumes an existing protected component policy;
+        native lifecycle and independent manual restore logging require separate acceptance.
     deprecation_state: "active"
     scenario_support:
       tiny: []

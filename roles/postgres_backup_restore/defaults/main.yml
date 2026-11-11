@@ -37,6 +37,12 @@ postgres_backup_restore_extra_psql_args: []
 # container and its existing local Unix-socket authentication. No OS provisioning.
 postgres_backup_restore_schedule_state: present
 postgres_backup_restore_schedule_enabled: false
+postgres_backup_restore_schedule_backend: systemd
+# Cron uses an explicitly named timezone and one daily start time.
+postgres_backup_restore_schedule_cron_timezone: UTC
+postgres_backup_restore_schedule_cron_hour: 0
+postgres_backup_restore_schedule_cron_minute: 0
+postgres_backup_restore_schedule_cron_file: "{{ postgres_backup_restore_schedule_unit }}"
 postgres_backup_restore_schedule_instance: ""
 postgres_backup_restore_schedule_user: ""
 postgres_backup_restore_schedule_group: ""
@@ -58,10 +64,13 @@ postgres_backup_restore_schedule_max_age_seconds: 90000
 postgres_backup_restore_schedule_podman_binary: /usr/bin/podman
 postgres_backup_restore_schedule_python_binary: /usr/bin/python3
 postgres_backup_restore_schedule_unit: "postgres-backup-{{ postgres_backup_restore_schedule_instance }}"
-postgres_backup_restore_schedule_worker: >-
-  /usr/local/libexec/lit-postgres-backup-{{ postgres_backup_restore_schedule_instance }}.py
+# One host-wide implementation can serve multiple instance-specific configurations.
+postgres_backup_restore_schedule_worker: /usr/local/libexec/postgres-backup.py
+# Optional existing shared component-log policy; no helper installation or trust changes here.
+postgres_backup_restore_schedule_log_config: ""
+postgres_backup_restore_schedule_log_worker: /usr/local/libexec/podman-component-logs/main.py
 postgres_backup_restore_schedule_config: >-
-  /etc/lit-postgres-backup/{{ postgres_backup_restore_schedule_instance }}.json
+  /etc/postgres-backup/{{ postgres_backup_restore_schedule_instance }}.json
 postgres_backup_restore_schedule_unit_dir: "{{ postgres_backup_restore_schedule_home }}/.config/systemd/user"
 postgres_backup_restore_schedule_environment:
   HOME: "{{ postgres_backup_restore_schedule_home }}"

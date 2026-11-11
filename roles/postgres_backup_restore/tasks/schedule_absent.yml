@@ -11,8 +11,14 @@
       - "{{ postgres_backup_restore_schedule_unit_dir }}"
       - "{{ postgres_backup_restore_schedule_worker }}"
       - "{{ postgres_backup_restore_schedule_config }}"
+      - "/etc/cron.d/{{ postgres_backup_restore_schedule_cron_file }}"
   changed_when: false
   check_mode: false
+
+- name: Remove the instance-specific PostgreSQL backup cron trigger
+  ansible.builtin.file:
+    path: "/etc/cron.d/{{ postgres_backup_restore_schedule_cron_file }}"
+    state: absent
 
 - name: Read the installed PostgreSQL backup timer state
   ansible.builtin.command:
@@ -73,7 +79,6 @@
     - "{{ postgres_backup_restore_schedule_unit_dir }}/{{ postgres_backup_restore_schedule_unit }}.timer"
     - "{{ postgres_backup_restore_schedule_unit_dir }}/{{ postgres_backup_restore_schedule_unit }}.service"
     - "{{ postgres_backup_restore_schedule_config }}"
-    - "{{ postgres_backup_restore_schedule_worker }}"
   notify: Postgres backup reload user manager
 
 - name: Apply pending PostgreSQL backup user-unit removal reloads
