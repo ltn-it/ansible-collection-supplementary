@@ -140,6 +140,43 @@
     }
   },
   "properties": {
+    "root_finalization": {
+      "const": "pending"
+    },
+    "root_final_quality_inputs": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cell",
+          "envelope",
+          "manifest_sha256",
+          "inventory_sha256"
+        ],
+        "properties": {
+          "cell": {
+            "type": "string",
+            "pattern": "^root-final-inputs/[1-9][0-9]*/cell/[A-Za-z0-9_.-]+$"
+          },
+          "envelope": {
+            "type": "string",
+            "pattern": "^root-final-inputs/[1-9][0-9]*/final-quality-receipt\\.json$"
+          },
+          "manifest_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "inventory_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        }
+      }
+    },
     "schema_version": {"const": 2},
     "mode": {"enum": ["ci", "candidate", "release"]},
     "repository": {"type": "string", "minLength": 1},
@@ -267,6 +304,10 @@
     "release_eligible": {"type": "boolean"}
   },
   "allOf": [
+    {
+      "if": {"required": ["root_finalization"]},
+      "then": {"properties": {"release_eligible": {"const": false}}}
+    },
     {
       "if": {
         "properties": {"mode": {"const": "release"}},

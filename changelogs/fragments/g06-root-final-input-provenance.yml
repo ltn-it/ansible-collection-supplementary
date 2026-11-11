@@ -1,0 +1,5 @@
+---
+bugfixes:
+  - Preserve pending and candidate evidence barriers across copying, nested inputs, and reaggregation.
+  - Retain original physical cell exports and signed final receipts, and independently reverify native provider proof
+    before later physical validation; keep ordinary offline business validation supported.

@@ -7,25 +7,34 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextvars
 import datetime
+import functools
 import hashlib
 import http.client
+import importlib
 import json
+import math
 import os
 import re
 import shutil
 import stat
 import tempfile
+import threading
 import time
 import urllib.request
+import weakref
 import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import urlsplit
 
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-from scripts import quality_evidence
+# The companion is also a script entry point. A fixed module import avoids
+# loading its script/package names twice during static checking of that entry.
+quality_evidence = importlib.import_module((__package__ + "." if __package__ else "") + "quality_evidence")
 
 ROOT_PUBLIC_KEY_HEX = "15a46de8e59602953884a1fe7138f40cfb3c12245af1f8e93a6f615421fe5788"
 SOURCE_REPOSITORY = "ltn-it/ansible-collection-supplementary"
@@ -39,6 +48,49 @@ class FinalQualityError(ValueError):
 def _need(condition: bool, reason: str) -> None:
     if not condition:
         raise FinalQualityError(reason)
+
+
+# Includes both cells, native/ZIP reads and local verification. Workflow jobs
+# additionally start a monotonic clock before checkout/setup, leaving 90 seconds
+# of their existing 600-second budget. These values only constrain acceptance.
+VERIFICATION_SECONDS = 240
+_PHASE_DEADLINE: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "g06_final_verification_deadline", default=None
+)
+
+
+def _check_deadline(deadline=None):
+    deadline = deadline if deadline is not None else _PHASE_DEADLINE.get()
+    _need(deadline is None or time.monotonic() < deadline, "physical verification phase budget exhausted")
+
+
+def _request_timeout():
+    deadline = _PHASE_DEADLINE.get()
+    _check_deadline(deadline)
+    return min(30, max(0.001, deadline - time.monotonic())) if deadline is not None else 30
+
+
+def bounded_verification(function):
+    @functools.wraps(function)
+    def bounded(*args, **kwargs):
+        now = time.monotonic()
+        deadline = min(now + VERIFICATION_SECONDS, _PHASE_DEADLINE.get() or float("inf"))
+        workflow = os.getenv("G06_FINAL_PHASE_DEADLINE", "")
+        if workflow:
+            _need(bool(re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", workflow)), "workflow verification clock")
+            bound = float(workflow)
+            _need(math.isfinite(bound), "workflow verification clock")
+            deadline = min(deadline, bound)
+        token = _PHASE_DEADLINE.set(deadline)
+        try:
+            _check_deadline()
+            result = function(*args, **kwargs)
+            _check_deadline()
+            return result
+        finally:
+            _PHASE_DEADLINE.reset(token)
+
+    return bounded
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -191,7 +243,10 @@ def verify_physical_evidence(
                 size = path.stat().st_size
                 _need(size <= quality_evidence.MAX_EVIDENCE_FILE_BYTES, "physical evidence member bound")
                 total += size
-        _need(count <= quality_evidence.MAX_EVIDENCE_FILES and total <= 2 * 1024**3, "physical evidence total bound")
+        _need(
+            count <= quality_evidence.MAX_EVIDENCE_FILES and total <= quality_evidence.MAX_EVIDENCE_TOTAL_BYTES,
+            "physical evidence total bound",
+        )
     _need(
         not quality_evidence._validate_checksums(root.resolve(), root.resolve() / "checksums/SHA256SUMS"),
         "physical evidence checksums",
@@ -247,16 +302,17 @@ def _native_read(path: str) -> dict[str, Any]:
             "User-Agent": "lit-g06-final-quality/1",
         },
     )
-    with urllib.request.build_opener(_NoRedirect).open(request, timeout=30) as response:
+    with urllib.request.build_opener(_NoRedirect).open(request, timeout=_request_timeout()) as response:
         _need(response.status == 200, "native metadata status")
         raw = response.read(8 * 1024**2 + 1)
+    _check_deadline()
     _need(len(raw) <= 8 * 1024**2, "native metadata bound")
     value = json.loads(raw, object_pairs_hook=_unique_object)
     _need(isinstance(value, dict), "native metadata object")
     return value
 
 
-def native_records(payload: dict[str, Any], *, run_id: int, source_sha: str) -> tuple[dict, dict]:
+def native_records(payload: dict[str, Any], *, run_id: int, source_sha: str) -> tuple[dict[str, Any], dict[str, Any]]:
     """Read only fixed provider endpoints, then join the original job and ZIP."""
     execution, artifact = payload.get("execution", {}), payload.get("artifact", {})
     for value in (execution.get("job_id"), execution.get("check_run_id"), artifact.get("id")):
@@ -316,7 +372,7 @@ def compare_provider_zip(stream, root: Path, artifact: dict[str, Any]) -> None:
     digest, size = hashlib.sha256(), 0
     while chunk := stream.read(1024 * 1024):
         size += len(chunk)
-        _need(size <= 2 * 1024**3, "native ZIP total bound")
+        _need(size <= quality_evidence.MAX_EVIDENCE_TOTAL_BYTES, "native ZIP total bound")
         digest.update(chunk)
     _need(
         size == artifact["size_in_bytes"] and digest.hexdigest() == artifact["digest_sha256"],
@@ -345,7 +401,10 @@ def compare_provider_zip(stream, root: Path, artifact: dict[str, Any]) -> None:
             )
             _need(member.file_size <= quality_evidence.MAX_EVIDENCE_FILE_BYTES, "native ZIP member size")
             total += member.file_size
-            _need(total <= 2 * 1024**3 and total <= max(size, 1) * 1000, "native ZIP expansion bound")
+            _need(
+                total <= quality_evidence.MAX_EVIDENCE_TOTAL_BYTES and total <= max(size, 1) * 1000,
+                "native ZIP expansion bound",
+            )
             if member.is_dir():
                 continue
             local = root / name
@@ -367,7 +426,7 @@ def compare_provider_zip(stream, root: Path, artifact: dict[str, Any]) -> None:
 def verify_provider_zip(root: Path, artifact: dict[str, Any]) -> None:
     token = os.environ.get("GITHUB_TOKEN", "")
     _need(bool(token) and not any(c.isspace() for c in token), "native read credential unavailable")
-    connection = http.client.HTTPSConnection("api.github.com", timeout=30)
+    connection = http.client.HTTPSConnection("api.github.com", timeout=_request_timeout())
     try:
         connection.request(
             "GET",
@@ -392,13 +451,14 @@ def verify_provider_zip(root: Path, artifact: dict[str, Any]) -> None:
         "native ZIP redirect origin",
     )
     _need(
-        type(artifact["size_in_bytes"]) is int and 0 < artifact["size_in_bytes"] <= 2 * 1024**3,
+        type(artifact["size_in_bytes"]) is int
+        and 0 < artifact["size_in_bytes"] <= quality_evidence.MAX_EVIDENCE_TOTAL_BYTES,
         "native ZIP expected bound",
     )
-    deadline = time.monotonic() + 300
+    deadline = min(time.monotonic() + 300, _PHASE_DEADLINE.get() or float("inf"))
     # The provider's signed URL receives no GitHub Authorization header.
     with (
-        urllib.request.build_opener(_NoRedirect).open(location.geturl(), timeout=30) as response,
+        urllib.request.build_opener(_NoRedirect).open(location.geturl(), timeout=_request_timeout()) as response,
         tempfile.TemporaryFile() as stream,
     ):
         _need(response.status == 200, "native ZIP download status")
@@ -407,12 +467,353 @@ def verify_provider_zip(root: Path, artifact: dict[str, Any]) -> None:
             size += len(chunk)
             _need(time.monotonic() < deadline and size <= artifact["size_in_bytes"], "native ZIP download bound")
             stream.write(chunk)
+        _check_deadline()
         compare_provider_zip(stream, root, artifact)
+        _check_deadline()
 
 
-def import_physical_inputs(
+# This directory is transport provenance, never another source of test reports.
+PROOF_DIRECTORY = "root-final-inputs"
+MAIN_PHYSICAL_CELLS = frozenset(
+    {
+        ("heavy", "keycloak-heavy", "ubuntu-24.04"),
+        ("application_acceptance", "keycloak-application-acceptance", "ubuntu-24.04"),
+    }
+)
+_PROOFS: weakref.WeakKeyDictionary[VerifiedPhysicalInputs, tuple[int, int, list[dict[str, Any]], float]] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+class VerifiedPhysicalInputs:
+    """Opaque process-local verification result; constructing one grants nothing."""
+
+
+def _canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode() + b"\n"
+
+
+def _inventory(root):
+    files = {}
+    total = 0
+    for path in quality_evidence._bounded_artifact_walk(root):
+        _need(not path.is_symlink(), "proof tree symlink")
+        if path.is_dir():
+            continue
+        _need(path.is_file(), "proof tree nonregular member")
+        data = quality_evidence._bounded_read(path)
+        total += len(data)
+        _need(total <= quality_evidence.MAX_EVIDENCE_TOTAL_BYTES, "proof tree total bound")
+        files[path.relative_to(root).as_posix()] = hashlib.sha256(data).hexdigest()
+    return files
+
+
+def _mint(records, *, deadline=None):
+    proof = VerifiedPhysicalInputs()
+    entries = []
+    for root, raw, inventory in records:
+        envelope = json.loads(raw, object_pairs_hook=_unique_object)
+        _need(raw == _canonical(envelope), "canonical final envelope")
+        _need(_inventory(root) == inventory, "verified input changed before proof binding")
+        entries.append({"root": root.resolve(), "envelope": raw, "inventory": dict(inventory), "envelope_path": None})
+    expires = min(deadline or float("inf"), _PHASE_DEADLINE.get() or time.monotonic() + VERIFICATION_SECONDS)
+    _PROOFS[proof] = (os.getpid(), threading.get_ident(), entries, expires)
+    return proof
+
+
+def _entries(proof):
+    state = _PROOFS.get(proof) if type(proof) is VerifiedPhysicalInputs else None
+    if state is None or state[:2] != (os.getpid(), threading.get_ident()):
+        raise FinalQualityError("unregistered final verification")
+    _check_deadline(state[3])
+    for entry in state[2]:
+        _need(_inventory(entry["root"]) == entry["inventory"], "verified physical input changed")
+        path = entry["envelope_path"]
+        if path is not None:
+            _need(
+                not path.is_symlink() and quality_evidence._bounded_read(path, 65536) == entry["envelope"],
+                "verified final envelope changed",
+            )
+    _check_deadline(state[3])
+    return state[2]
+
+
+def authorized_roots(proof):
+    return {entry["root"] for entry in _entries(proof)}
+
+
+def scanner_payloads(proof):
+    """Mask only the exact verified public signature, scanning every other field."""
+    masks = {}
+    for entry in _entries(proof):
+        if entry["envelope_path"] is not None:
+            envelope = json.loads(entry["envelope"])
+            envelope["signature"] = "verified-public-final-evidence-signature"
+            masks[entry["envelope_path"]] = (entry["envelope"], _canonical(envelope))
+    return masks
+
+
+def retained_paths(proof):
+    return {entry["root"] / name for entry in _entries(proof) for name in entry["inventory"]} | {
+        entry["envelope_path"] for entry in _entries(proof) if entry["envelope_path"] is not None
+    }
+
+
+def _combined_bound(roots, additional_bytes=0, additional_files=0):
+    total, count = additional_bytes, additional_files
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in quality_evidence._bounded_artifact_walk(root):
+            _need(not path.is_symlink(), "combined evidence symlink")
+            if path.is_dir():
+                continue
+            _need(path.is_file(), "combined evidence member type")
+            size = path.stat().st_size
+            count += 1
+            total += size
+            _need(
+                size <= quality_evidence.MAX_EVIDENCE_FILE_BYTES
+                and total <= quality_evidence.MAX_EVIDENCE_TOTAL_BYTES
+                and count <= quality_evidence.MAX_EVIDENCE_FILES,
+                "combined evidence total bound",
+            )
+
+
+def persist_inputs(proof, destination):
+    """Retain original checksummed exports and signed envelopes, within existing caps."""
+    entries = _entries(proof)
+    _combined_bound(
+        [destination, *(entry["root"] for entry in entries)],
+        sum(len(entry["envelope"]) for entry in entries),
+        len(entries),
+    )
+    records = []
+    refs = []
+    for entry in entries:
+        envelope = json.loads(entry["envelope"])
+        artifact = envelope["receipt"]["artifact"]
+        relative = Path(PROOF_DIRECTORY) / str(artifact["id"])
+        cell = relative / "cell" / artifact["name"]
+        receipt = relative / "final-quality-receipt.json"
+        _need(not (destination / relative).exists(), "duplicate final input artifact")
+        shutil.copytree(entry["root"], destination / cell)
+        (destination / receipt).write_bytes(entry["envelope"])
+        records.append((destination / cell, entry["envelope"], entry["inventory"]))
+        refs.append(
+            {
+                "cell": cell.as_posix(),
+                "envelope": receipt.as_posix(),
+                "manifest_sha256": entry["inventory"]["manifest.json"],
+                "inventory_sha256": hashlib.sha256(_canonical(entry["inventory"])).hexdigest(),
+            }
+        )
+    retained = _mint(records, deadline=_PROOFS[proof][3])
+    for entry, ref in zip(_entries(retained), refs, strict=True):
+        entry["envelope_path"] = (destination / ref["envelope"]).resolve()
+    _PROOFS[proof] = _PROOFS[retained]
+    return refs, proof
+
+
+def relocate_inputs(proof, previous, current):
+    # Caller has just atomically renamed the complete stage. Recheck at its new location.
+    state = _PROOFS.get(proof)
+    if state is None or state[:2] != (os.getpid(), threading.get_ident()):
+        raise FinalQualityError("unregistered final verification")
+    for entry in state[2]:
+        entry["root"] = current / entry["root"].relative_to(previous)
+        entry["envelope_path"] = current / entry["envelope_path"].relative_to(previous)
+    _entries(proof)
+
+
+def share_verified_inputs(destination, source):
+    _entries(destination) if destination is source else None
+    _need(type(destination) is VerifiedPhysicalInputs and destination in _PROOFS, "unregistered final verification")
+    _entries(source)
+    _PROOFS[destination] = _PROOFS[source]
+
+
+def _reference_hashes(root, results):
+    hashes = []
+    for result in results:
+        for field in ("junit", "allure_results"):
+            for name in result.get(field, []):
+                relative = PurePosixPath(name)
+                _need(not relative.is_absolute() and ".." not in relative.parts, "final report reference path")
+                path = root / name
+                _need(not path.is_symlink(), "final report reference symlink")
+                hashes.append((field, hashlib.sha256(quality_evidence._bounded_read(path)).hexdigest()))
+    return sorted(hashes)
+
+
+def require_persisted_binding(proof, root, manifest):
+    entries = _entries(proof)
+    require_main_coverage(proof)
+    refs = manifest.get("root_final_quality_inputs")
+    _need(isinstance(refs, list) and len(refs) == len(entries), "physical proof mapping missing")
+    for entry in entries:
+        expected = {
+            "cell": entry["root"].relative_to(root).as_posix(),
+            "envelope": entry["envelope_path"].relative_to(root).as_posix(),
+            "manifest_sha256": entry["inventory"]["manifest.json"],
+            "inventory_sha256": hashlib.sha256(_canonical(entry["inventory"])).hexdigest(),
+        }
+        _need(refs.count(expected) == 1, "physical proof mapping changed")
+        payload = json.loads(entry["envelope"])["receipt"]
+        _need(
+            manifest.get("repository") == payload["repository"]
+            and manifest.get("commit_sha") == manifest.get("expected_commit_sha") == payload["source_sha"]
+            and manifest.get("workflow_run_id") == str(payload["run_id"])
+            and manifest.get("workflow_attempt") == str(payload["run_attempt"]),
+            "aggregate original native tuple differs from verified export",
+        )
+        raw = json.loads(quality_evidence._bounded_read(entry["root"] / "manifest.json"))
+        selected = [
+            result
+            for result in manifest.get("results", [])
+            if (result.get("profile", "").replace("-", "_"), result.get("scenario"), result.get("target"))
+            == tuple(payload[key] for key in ("profile", "scenario", "target"))
+        ]
+        _need(
+            bool(selected) and _reference_hashes(root, selected) == _reference_hashes(entry["root"], raw["results"]),
+            "aggregate physical reports differ from verified export",
+        )
+
+
+def expected_context(source_sha, controller_sha=None, run_id=None):
+    controller = controller_sha or os.getenv("G06_VALIDATION_CONTROLLER_SHA", "")
+    run = str(run_id or os.getenv("CI_RUN_ID") or os.getenv("GITHUB_RUN_ID") or "")
+    _need(
+        bool(re.fullmatch(r"[a-f0-9]{40}", source_sha or ""))
+        and bool(re.fullmatch(r"[a-f0-9]{40}", controller))
+        and bool(re.fullmatch(r"[1-9][0-9]*", run)),
+        "physical proof expected controller/run unavailable",
+    )
+    return source_sha, controller, int(run)
+
+
+@bounded_verification
+def verify_persisted_inputs(root, manifest, *, source_sha, controller_sha=None, run_id=None):
+    try:
+        return _verify_persisted_inputs(
+            root, manifest, source_sha=source_sha, controller_sha=controller_sha, run_id=run_id
+        )
+    except (ValueError, OSError, KeyError, TypeError, InvalidSignature) as error:
+        raise FinalQualityError("persisted physical final proof held") from error
+
+
+def _verify_persisted_inputs(root, manifest, *, source_sha, controller_sha=None, run_id=None):
+    """Fresh independent native/ZIP verification; stored references are locators only."""
+    source, controller, run = expected_context(source_sha, controller_sha, run_id)
+    refs = manifest.get("root_final_quality_inputs")
+    _need(isinstance(refs, list) and 0 < len(refs) <= 2, "physical proof reference inventory")
+    records, names = [], set()
+    expected_files: set[Path] = set()
+    for ref in refs:
+        _need(
+            isinstance(ref, dict) and set(ref) == {"cell", "envelope", "manifest_sha256", "inventory_sha256"},
+            "physical proof reference schema",
+        )
+        cell, receipt = (PurePosixPath(ref[key]) for key in ("cell", "envelope"))
+        _need(
+            len(cell.parts) == 4
+            and cell.parts[0] == PROOF_DIRECTORY
+            and cell.parts[1].isdigit()
+            and cell.parts[2] == "cell"
+            and cell.name not in {"", ".", ".."}
+            and receipt == PurePosixPath(PROOF_DIRECTORY, cell.parts[1], "final-quality-receipt.json")
+            and cell.parts[1] not in names,
+            "physical proof reference path",
+        )
+        names.add(cell.parts[1])
+        local, envelope_path = root / str(cell), root / str(receipt)
+        for component in (local, local.parent, local.parent.parent, local.parent.parent.parent, envelope_path):
+            _need(not component.is_symlink(), "physical proof reference symlink")
+        raw = quality_evidence._bounded_read(envelope_path, 65536)
+        envelope = json.loads(raw, object_pairs_hook=_unique_object)
+        _need(raw == _canonical(envelope), "canonical final envelope")
+        payload = envelope["receipt"]
+        _need(str(payload["artifact"]["id"]) == cell.parts[1], "physical proof artifact locator")
+        expected = {
+            "repository": SOURCE_REPOSITORY,
+            "repository_id": SOURCE_REPOSITORY_ID,
+            "run_id": run,
+            "run_attempt": 1,
+            "source_sha": source,
+            "controller_sha": controller,
+            **{key: payload[key] for key in ("profile", "scenario", "target")},
+        }
+        inventory = _inventory(local)
+        execution, artifact = native_records(payload, run_id=run, source_sha=source)
+        verify_physical_evidence(
+            local,
+            envelope,
+            public_key_hex=ROOT_PUBLIC_KEY_HEX,
+            expected=expected,
+            native_execution=execution,
+            native_artifact=artifact,
+        )
+        verify_provider_zip(local, artifact)
+        _need(_inventory(local) == inventory, "physical input changed during native verification")
+        _need(
+            ref["manifest_sha256"] == inventory["manifest.json"]
+            and ref["inventory_sha256"] == hashlib.sha256(_canonical(inventory)).hexdigest(),
+            "physical proof retained inventory",
+        )
+        records.append((local, raw, inventory))
+        expected_files.update((local / name).resolve() for name in inventory)
+        expected_files.add(envelope_path.resolve())
+    actual = {p.resolve() for p in quality_evidence._bounded_artifact_walk(root / PROOF_DIRECTORY) if p.is_file()}
+    _need(actual == expected_files, "physical proof unreferenced member")
+    proof = _mint(records)
+    for entry, ref in zip(_entries(proof), refs, strict=True):
+        entry["envelope_path"] = (root / ref["envelope"]).resolve()
+    require_persisted_binding(proof, root, manifest)
+    return proof
+
+
+def physical_cells(proof):
+    return {
+        tuple(json.loads(entry["envelope"])["receipt"][key] for key in ("profile", "scenario", "target"))
+        for entry in _entries(proof)
+    }
+
+
+def require_main_coverage(proof):
+    cells = [
+        tuple(json.loads(entry["envelope"])["receipt"][key] for key in ("profile", "scenario", "target"))
+        for entry in _entries(proof)
+    ]
+    _need(len(cells) == 2 and set(cells) == MAIN_PHYSICAL_CELLS, "exact Main physical cell coverage")
+
+
+def combine_inputs(proofs):
+    records: dict[int, tuple[Path, bytes, dict[str, str]]] = {}
+    for proof in proofs:
+        for entry in _entries(proof):
+            key = json.loads(entry["envelope"])["receipt"]["artifact"]["id"]
+            if key in records:
+                _need(
+                    records[key][1] == entry["envelope"] and _inventory(records[key][0]) == entry["inventory"],
+                    "conflicting physical input provenance",
+                )
+            records[key] = (entry["root"], entry["envelope"], entry["inventory"])
+    return _mint(list(records.values()), deadline=min(_PROOFS[proof][3] for proof in proofs))
+
+
+def import_physical_inputs(downloaded, receipts, destination, *, run_id, source_sha, controller_sha):
+    # Compatibility importer remains non-authoritative: final aggregation needs
+    # the opaque result or fresh persisted native verification.
+    proof = verified_physical_inputs(
+        downloaded, receipts, destination, run_id=run_id, source_sha=source_sha, controller_sha=controller_sha
+    )
+    return len(_entries(proof))
+
+
+@bounded_verification
+def verified_physical_inputs(
     downloaded: Path, receipts: Path, destination: Path, *, run_id: int, source_sha: str, controller_sha: str
-) -> int:
+) -> VerifiedPhysicalInputs:
     """Verify every direct physical tree before copying any into the aggregate."""
     _need(
         type(run_id) is int
@@ -462,6 +863,7 @@ def import_physical_inputs(
             "target": targets[0],
         }
         envelope = receipt_index.pop(root.name)
+        inventory = _inventory(root)
         execution, artifact = native_records(envelope["receipt"], run_id=run_id, source_sha=source_sha)
         verify_physical_evidence(
             root,
@@ -472,11 +874,16 @@ def import_physical_inputs(
             native_artifact=artifact,
         )
         verify_provider_zip(root, artifact)
-        verified.append(root)
+        _need(_inventory(root) == inventory, "physical input changed during native verification")
+        verified.append((root, envelope, inventory))
     _need(not receipt_index, "unmatched final artifact receipt")
-    for root in verified:
-        shutil.copytree(root, destination / root.name)
-    return len(verified)
+    _combined_bound([destination, *(root for root, _envelope, _inventory_value in verified)])
+    records = []
+    for root, envelope, inventory in verified:
+        copied = destination / root.name
+        shutil.copytree(root, copied)
+        records.append((copied.resolve(), _canonical(envelope), inventory))
+    return _mint(records)
 
 
 def main() -> int:
@@ -486,23 +893,61 @@ def main() -> int:
     parser.add_argument("--run-id", type=int, required=True)
     parser.add_argument("--source-sha", required=True)
     parser.add_argument("--controller-sha", required=True)
+    parser.add_argument("--aggregate-root", type=Path)
+    parser.add_argument("--registry", type=Path)
+    parser.add_argument("--run-attempt", default="1")
     args = parser.parse_args()
     try:
-        count = import_physical_inputs(
-            args.downloaded,
-            args.receipts,
-            args.destination,
-            run_id=args.run_id,
-            source_sha=args.source_sha,
-            controller_sha=args.controller_sha,
-        )
-        print(f"Verified {count} physical evidence trees against final Root and native provider records")
-        return 0
+        return _main_verified(args)
     except Exception:
         # Never print bearer-bearing HTTP request objects or untrusted records.
         print("Final physical evidence verification failed; no final quality acceptance")
+        if args.aggregate_root is not None and os.getenv("GITHUB_OUTPUT"):
+            with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
+                stream.write("assemble_exit_code=1\nvalidate_exit_code=1\n")
         return 1
 
 
+@bounded_verification
+def _main_verified(args):
+    proof = verified_physical_inputs(
+        args.downloaded,
+        args.receipts,
+        args.destination,
+        run_id=args.run_id,
+        source_sha=args.source_sha,
+        controller_sha=args.controller_sha,
+    )
+    count = len(_entries(proof))
+    print(f"Verified {count} physical evidence trees against final Root and native provider records")
+    if args.aggregate_root is not None:
+        require_main_coverage(proof)
+        assembled = quality_evidence.assemble(
+            args.aggregate_root,
+            input_roots=[args.destination],
+            registry_path=args.registry,
+            run_attempt=args.run_attempt,
+            expected_commit=args.source_sha,
+            release_mode=True,
+            final_inputs=proof,
+        )
+        validated = quality_evidence.validate(
+            args.aggregate_root, expected_commit=args.source_sha, release_mode=True, final_inputs=proof
+        )
+        if os.getenv("GITHUB_OUTPUT"):
+            with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
+                stream.write(f"assemble_exit_code={assembled}\nvalidate_exit_code={validated}\n")
+        return 0 if assembled == validated == 0 else 1
+    return 0
+
+
 if __name__ == "__main__":
+    # Keep the verifier registry single when quality_evidence imports this module.
+    import sys
+
+    if __package__:
+        sys.modules[__package__ + ".g06_final_quality"] = sys.modules[__name__]
+        vars(importlib.import_module(__package__))["g06_final_quality"] = sys.modules[__name__]
+    else:
+        sys.modules["g06_final_quality"] = sys.modules[__name__]
     raise SystemExit(main())

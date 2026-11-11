@@ -868,7 +868,44 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             self.assertNotIn("secrets", job)
             self.assertNotIn("continue-on-error", job)
             previous = name
-        self.assertEqual(jobs["runtime-evidence"]["env"]["G06_VALIDATION_CONTROLLER_SHA"], callee.rsplit("@", 1)[1])
+        self.assertEqual(
+            load_yaml(WORKFLOWS / "collection-ci.yml")["env"]["G06_VALIDATION_CONTROLLER_SHA"], callee.rsplit("@", 1)[1]
+        )
+
+    def test_physical_proof_is_same_process_and_each_later_native_read_is_scoped(self) -> None:
+        workflow = load_yaml(WORKFLOWS / "collection-ci.yml")
+        jobs = workflow["jobs"]
+        aggregate = next(step for step in jobs["runtime-evidence"]["steps"] if step.get("id") == "assemble")
+        self.assertIn("python -m scripts.g06_final_quality", aggregate["run"])
+        self.assertIn("--aggregate-root artifacts/evidence", aggregate["run"])
+        self.assertNotIn("python scripts/quality_evidence.py", aggregate["run"])
+        self.assertEqual(aggregate["env"]["GITHUB_TOKEN"], "${{ github.token }}")
+        self.assertEqual(jobs["release-admission"]["timeout-minutes"], 10)
+        for name, seconds in (
+            ("runtime-evidence", 3510),
+            ("release-admission", 510),
+            ("release-security", 3510),
+            ("release-validation", 1110),
+        ):
+            job = jobs[name]
+            clock = job["steps"][0]
+            self.assertIn("time.monotonic() + " + str(seconds), clock["run"])
+            self.assertIn("G06_FINAL_PHASE_DEADLINE=", clock["run"])
+            self.assertEqual(job["permissions"]["actions"], "read")
+            self.assertEqual(job["permissions"]["checks"], "read")
+            for step in job["steps"]:
+                if "python scripts/quality_evidence.py validate" in step.get("run", ""):
+                    self.assertEqual(step["env"]["GITHUB_TOKEN"], "${{ github.token }}")
+        publish = load_yaml(WORKFLOWS / "collection-publish.yml")["jobs"]["publish"]
+        step = next(
+            step
+            for step in publish["steps"]
+            if step.get("name") == "Validate candidate, MANIFEST, evidence, and repository policy"
+        )
+        self.assertEqual(step["env"]["CI_RUN_ID"], "${{ needs.release-validation.outputs.ci-run-id }}")
+        self.assertEqual(step["env"]["G06_VALIDATION_CONTROLLER_SHA"], workflow["env"]["G06_VALIDATION_CONTROLLER_SHA"])
+        self.assertEqual(step["env"]["GITHUB_TOKEN"], "${{ github.token }}")
+        self.assertEqual(publish["permissions"]["checks"], "read")
 
     def test_protected_main_evidence_adapter_is_exact_and_fail_closed(self) -> None:
         jobs = load_yaml(WORKFLOWS / "collection-ci.yml")["jobs"]
