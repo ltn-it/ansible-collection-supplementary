@@ -698,7 +698,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             self.assertRegex(
                 delegated["uses"],
                 r"^ltn-it/modulix-validation/\.github/workflows/"
-                r"collection-quality-profile\.yml@[0-9a-f]{40}$",
+                r"collection-quality-profile-isolated\.yml@[0-9a-f]{40}$",
             )
             self.assertEqual(profile, delegated["with"]["profile"])
             self.assertIn("quality-matrix.outputs", delegated["with"]["matrix-json"])
@@ -811,14 +811,20 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             delegated = jobs[job_name]
             self.assertEqual(
                 "ltn-it/modulix-validation/.github/workflows/"
-                "collection-quality-profile.yml@"
-                "154c99eb0d907b01edc10e9b39c94ef4912fd9dd",
+                "collection-quality-profile-isolated.yml@"
+                "566e97ec3828b8547c74745c1b79e53d0353b1e3",
                 delegated["uses"],
             )
+            self.assertNotIn("environment-name", delegated["with"])
             self.assertEqual(
-                "ansible-collection-runtime-protected",
-                delegated["with"]["environment-name"],
+                {"contents": "read", "actions": "read", "id-token": "write"},
+                delegated["permissions"],
             )
+            self.assertEqual(
+                "collection-candidate-${{ github.event.pull_request.head.sha || github.sha }}",
+                delegated["with"]["candidate-artifact"],
+            )
+            self.assertEqual("${{ github.event.pull_request.head.sha || github.sha }}", delegated["with"]["source-sha"])
             self.assertNotIn("secrets", delegated)
         self.assertEqual("Collection / Release Evidence", jobs["evidence"]["name"])
         self.assertEqual(

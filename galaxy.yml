@@ -47,6 +47,7 @@ build_ignore:
   - node_modules
   - .git
   - .github
+  - scripts/g06_courier
   - .gitignore
   - .molecule
   - ansible_collections
