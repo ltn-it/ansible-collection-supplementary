@@ -1747,6 +1747,8 @@ promotion input only and never satisfy the release-required supported-target mat
 
 ## Scenarios
 
+A scenario may explicitly declare `instance_type: container` or `instance_type: vm`; otherwise its matrix cells retain the target's instance type. This execution setting does not change scenario eligibility, role maturity, target disposition, or release requirements.
+
 | Scenario | Profile | State | Implementation | Reported roles | Exercised dependencies | Test application mode | Application claims | Application policy rationale | JUnit | Allure | Evidence |
 |---|---|---|---|---|---|---|---|---|---:|---:|---:|
 | aap-basic | Tiny | experimental | partial | aap | — | not-applicable | — | Scenario exercises controller-side role behavior without deploying an independently versioned application. | False | False | False |

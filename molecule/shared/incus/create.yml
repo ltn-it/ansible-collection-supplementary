@@ -217,43 +217,47 @@
         that:
           - item.1.key is not match('^user\.lit-molecule-')
           - item.1.key != molecule_incus_owner_label
+          - item.1.key not in ['limits.cpu', 'limits.memory']
         fail_msg: >-
-          Platform configuration must not set lifecycle-reserved ownership labels.
+          Use the platform resources field for limits; lifecycle ownership labels are reserved.
       loop: "{{ molecule_incus_instances | subelements('config', skip_missing=True) }}"
       loop_control:
         label: "{{ item.0.name }}:{{ item.1.key | default('<invalid>') }}"
 
-    - name: Initialize requested resource totals
+    - name: Initialize Incus platform resource inputs
       ansible.builtin.set_fact:
-        molecule_incus_requested_cpu_total: 0
-        molecule_incus_requested_memory_total: 0
-        molecule_incus_requested_disk_total: 0
+        molecule_incus_resource_requests: {}
 
-    - name: Calculate requested resource totals
+    - name: Resolve Incus platform resource inputs
       ansible.builtin.set_fact:
-        molecule_incus_requested_cpu_total: >-
+        molecule_incus_resource_requests: >-
           {{
-            molecule_incus_requested_cpu_total | int
-            + ((item.resources | default({})).cpu
-              | default(molecule_incus_default_cpu) | int)
-          }}
-        molecule_incus_requested_memory_total: >-
-          {{
-            molecule_incus_requested_memory_total | int
-            + (((item.resources | default({})).memory
-              | default(molecule_incus_default_memory)
-              | regex_replace('iB$', 'B')) | human_to_bytes)
-          }}
-        molecule_incus_requested_disk_total: >-
-          {{
-            molecule_incus_requested_disk_total | int
-            + (((item.resources | default({})).disk
-              | default(molecule_incus_default_disk)
-              | regex_replace('iB$', 'B')) | human_to_bytes)
+            molecule_incus_resource_requests | combine({ item.name: {
+              'cpu': (item.resources | default({})).cpu | default(molecule_incus_default_cpu) | string,
+              'memory': (item.resources | default({})).memory | default(molecule_incus_default_memory),
+              'disk': (item.resources | default({})).disk | default(molecule_incus_default_disk)
+            } })
           }}
       loop: "{{ molecule_incus_instances }}"
       loop_control:
         label: "{{ item.name }}"
+
+    - name: Qualify the explicit Incus transport before lifecycle access
+      ansible.builtin.include_tasks: >-
+        {{
+          lookup(
+            'ansible.builtin.first_found',
+            {
+              'files': [
+                playbook_dir ~ '/transport.yml',
+                playbook_dir ~ '/../shared/incus/transport.yml',
+                playbook_dir ~ '/../incus/transport.yml'
+              ]
+            }
+          )
+        }}
+      vars:
+        molecule_incus_transport_require_capacity: true
 
     - name: Read available controller CPUs
       ansible.builtin.command:
@@ -262,6 +266,7 @@
           - _NPROCESSORS_ONLN
       register: molecule_incus_available_cpu
       changed_when: false
+      when: not molecule_incus_is_remote | bool
 
     - name: Read available controller memory
       ansible.builtin.command:
@@ -271,6 +276,7 @@
           - /proc/meminfo
       register: molecule_incus_available_memory
       changed_when: false
+      when: not molecule_incus_is_remote | bool
 
     - name: Read available controller workspace storage
       ansible.builtin.command:
@@ -281,22 +287,39 @@
           - "{{ molecule_incus_workspace }}"
       register: molecule_incus_available_disk
       changed_when: false
+      when: not molecule_incus_is_remote | bool
 
     - name: Enforce Incus host resource prerequisites
       ansible.builtin.assert:
         that:
-          - molecule_incus_available_cpu.stdout | int >= molecule_incus_requested_cpu_total | int
+          - molecule_incus_available_cpu.stdout | int >= molecule_incus_transport_facts.requested.cpu | int
           - >-
             molecule_incus_available_memory.stdout | int
-            >= molecule_incus_requested_memory_total | int
+            >= molecule_incus_transport_facts.requested.memory | int
           - >-
             molecule_incus_available_disk.stdout_lines[-1] | trim | int
-            >= molecule_incus_requested_disk_total | int
+            >= molecule_incus_transport_facts.requested.disk | int
         fail_msg: >-
           Insufficient Incus runner resources. Requested
-          CPU={{ molecule_incus_requested_cpu_total }},
-          memory={{ molecule_incus_requested_memory_total }} bytes,
-          disk={{ molecule_incus_requested_disk_total }} bytes.
+          CPU={{ molecule_incus_transport_facts.requested.cpu }},
+          memory={{ molecule_incus_transport_facts.requested.memory }} bytes,
+          disk={{ molecule_incus_transport_facts.requested.disk }} bytes.
+      when: not molecule_incus_is_remote | bool
+
+    - name: Enforce authenticated remote resource observations and hard project quota headroom
+      # Every create reconciles through stop/configure/start. Like the local
+      # MemAvailable gate, TLS requires actual free RAM for the full request;
+      # configured limits on existing guests are only logical quota credit.
+      ansible.builtin.assert:
+        that:
+          - molecule_incus_transport_facts.available.cpu | int >= molecule_incus_transport_facts.requested.cpu | int
+          - >-
+            molecule_incus_transport_facts.available.memory | int
+            >= molecule_incus_transport_facts.requested.memory | int
+        fail_msg: >-
+          Remote CPU, memory, storage-pool observations or hard project quota headroom are insufficient.
+          These observations do not reserve resources; upstream admission must also reserve the full cell.
+      when: molecule_incus_is_remote | bool
 
     - name: Verify the Incus client is installed
       ansible.builtin.command:
@@ -341,6 +364,17 @@
             | length > 0
           }}
 
+    - name: Require a declared remote VM driver without replacing actual VM readiness
+      ansible.builtin.assert:
+        that:
+          - molecule_incus_transport_facts.declares_vm_driver | bool
+        fail_msg: >-
+          The authenticated remote server does not declare a VM driver.
+          A declared driver alone never replaces actual VM creation, start, agent, and functional checks.
+      when:
+        - molecule_incus_is_remote | bool
+        - molecule_incus_requires_kvm | bool
+
     - name: Verify KVM is readable for VM scenarios
       ansible.builtin.command:
         argv:
@@ -350,7 +384,9 @@
       register: molecule_incus_kvm_readable
       changed_when: false
       failed_when: false
-      when: molecule_incus_requires_kvm | bool
+      when:
+        - molecule_incus_requires_kvm | bool
+        - not molecule_incus_is_remote | bool
 
     - name: Verify KVM is writable for VM scenarios
       ansible.builtin.command:
@@ -361,7 +397,9 @@
       register: molecule_incus_kvm_writable
       changed_when: false
       failed_when: false
-      when: molecule_incus_requires_kvm | bool
+      when:
+        - molecule_incus_requires_kvm | bool
+        - not molecule_incus_is_remote | bool
 
     - name: Require usable KVM for VM scenarios
       ansible.builtin.assert:
@@ -370,7 +408,9 @@
           - molecule_incus_kvm_writable.rc == 0
         fail_msg: >-
           At least one target is a VM, but /dev/kvm is not readable and writable.
-      when: molecule_incus_requires_kvm | bool
+      when:
+        - molecule_incus_requires_kvm | bool
+        - not molecule_incus_is_remote | bool
 
     - name: Verify requested Incus images are resolvable
       ansible.builtin.command:
@@ -393,20 +433,23 @@
       register: molecule_incus_firewalld_service
       changed_when: false
       failed_when: false
+      when: not molecule_incus_is_remote | bool
 
     - name: Resolve the managed bridge firewall controller
       ansible.builtin.set_fact:
         molecule_incus_firewalld_active: >-
           {{
-            molecule_incus_firewalld_service.rc == 0
-            and molecule_incus_firewalld_service.stdout | trim == 'active'
+            not molecule_incus_is_remote
+            and molecule_incus_firewalld_service.rc | default(1) == 0
+            and molecule_incus_firewalld_service.stdout | default('') | trim == 'active'
           }}
         molecule_incus_firewall_controller: >-
           {{
             'firewalld-runtime'
             if (
-              molecule_incus_firewalld_service.rc == 0
-              and molecule_incus_firewalld_service.stdout | trim == 'active'
+              not molecule_incus_is_remote
+              and molecule_incus_firewalld_service.rc | default(1) == 0
+              and molecule_incus_firewalld_service.stdout | default('') | trim == 'active'
             )
             else 'incus'
           }}
@@ -474,13 +517,18 @@
           - >-
             molecule_incus_network_before.rc != 0
             or (
+              molecule_incus_is_remote
+              and (molecule_incus_network_before.stdout | from_yaml).config is mapping
+              and (molecule_incus_network_before.stdout | from_yaml).config == {}
+            )
+            or (
               molecule_incus_network_owner_before.rc | default(1) == 0
               and molecule_incus_network_owner_before.stdout | default('') | trim
                 == molecule_incus_owner_effective
             )
         fail_msg: >-
-          The deterministic Incus network name already exists without this run's
-          exact owner label; it will not be inspected, changed, or reused.
+          The deterministic network has conflicting visible ownership and is not
+          the redacted inherited bridge covered by this Root-signed TLS context.
 
     - name: Create the managed network with atomic exact-owner labels
       ansible.builtin.command:
@@ -510,10 +558,12 @@
                 else []
               )
           }}
-      when: molecule_incus_network_before.rc != 0
+      when:
+        - not molecule_incus_is_remote | bool
+        - molecule_incus_network_before.rc != 0
       register: molecule_incus_network_create
       until: molecule_incus_network_create.rc == 0
-      retries: 3
+      retries: "{{ 0 if molecule_incus_is_remote else 3 }}"
       delay: 10
       changed_when: true
 
@@ -542,6 +592,7 @@
               else 'none'
             }}
       changed_when: true
+      when: not molecule_incus_is_remote | bool
 
     - name: Inspect the exact-owned managed network after reconciliation
       ansible.builtin.command:
@@ -553,11 +604,46 @@
       register: molecule_incus_network_after
       changed_when: false
 
+    - name: Require a defined managed-network config mapping
+      ansible.builtin.assert:
+        that:
+          - (molecule_incus_network_after.stdout | from_yaml).config is mapping
+        fail_msg: Missing or malformed bridge configuration is not a redacted mapping.
+
+    - name: Resolve managed-network observation visibility
+      ansible.builtin.set_fact:
+        molecule_incus_network_config: >-
+          {{
+            molecule_incus_transport_facts.network_config
+            if (molecule_incus_is_remote and (molecule_incus_network_after.stdout | from_yaml).config == {})
+            else (molecule_incus_network_after.stdout | from_yaml).config
+          }}
+        molecule_incus_network_config_redacted: >-
+          {{ molecule_incus_is_remote and (molecule_incus_network_after.stdout | from_yaml).config == {} }}
+
     - name: Validate managed network isolation before attaching instances
       ansible.builtin.assert:
         that:
+          - >-
+            not molecule_incus_is_remote
+            or (molecule_incus_network_after.stdout | from_yaml).name == molecule_incus_network_effective
           - (molecule_incus_network_after.stdout | from_yaml).managed | bool
           - (molecule_incus_network_after.stdout | from_yaml).type == 'bridge'
+          - >-
+            ((molecule_incus_network_after.stdout | from_yaml).used_by | default([]))
+            | difference(
+                molecule_incus_instances
+                | map(attribute='name')
+                | map('regex_replace', '^(.*)$', '/1.0/instances/\\1'
+                    ~ ('?project=' ~ molecule_incus_transport_facts.project if molecule_incus_is_remote else ''))
+                | list
+              )
+            | length == 0
+        fail_msg: The declared managed bridge has an unexpected type, name or visible resource user.
+
+    - name: Validate every visible managed-network configuration field
+      ansible.builtin.assert:
+        that:
           - >-
             (molecule_incus_network_after.stdout | from_yaml).config['user.lit-molecule-owner']
             == molecule_incus_owner_effective
@@ -582,18 +668,20 @@
               if molecule_incus_firewalld_active
               else 'none'
             )
-          - >-
-            ((molecule_incus_network_after.stdout | from_yaml).used_by | default([]))
-            | difference(
-                molecule_incus_instances
-                | map(attribute='name')
-                | map('regex_replace', '^(.*)$', '/1.0/instances/\\1')
-                | list
-              )
-            | length == 0
-        fail_msg: >-
-          The exact-owned network is not an isolated managed IPv4 bridge or is
-          attached to an undeclared resource; no instance will be started.
+        fail_msg: Visible bridge configuration conflicts with the exact owner or required network isolation.
+      when: not molecule_incus_network_config_redacted | bool
+
+    - name: Compare every visible TLS bridge field with the Root-signed projection
+      ansible.builtin.assert:
+        that:
+          - molecule_incus_network_config[item.key] == item.value
+        fail_msg: Visible bridge configuration conflicts with the Root-signed cell facts.
+      loop: "{{ molecule_incus_transport_facts.network_config | default({}) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when:
+        - molecule_incus_is_remote | bool
+        - not molecule_incus_network_config_redacted | bool
 
     - name: Inspect any existing runtime firewalld bridge binding
       become: true
@@ -684,16 +772,23 @@
             "network": {{ molecule_incus_network_effective | to_json }},
             "network_type": "bridge",
             "managed": true,
-            "exact_owner_match": true,
+            "network_config_visibility": {{
+              ('redacted' if molecule_incus_network_config_redacted else 'visible') | to_json
+            }},
+            "used_by_visibility": {{ ('lease-visible' if molecule_incus_is_remote else 'local-admin') | to_json }},
+            "network_config_source": {{
+              ('root-signed-runtime' if molecule_incus_network_config_redacted else 'visible-api') | to_json
+            }},
+            "exact_owner_match": {{ (none if molecule_incus_network_config_redacted else true) | to_json }},
             "ipv4_address": {{
-              (molecule_incus_network_after.stdout | from_yaml).config['ipv4.address'] | to_json
+              molecule_incus_network_config.get('ipv4.address', none) | to_json
             }},
-            "ipv4_dhcp": true,
-            "ipv4_nat": true,
+            "ipv4_dhcp": {{ (none if molecule_incus_network_config_redacted else true) | to_json }},
+            "ipv4_nat": {{ (none if molecule_incus_network_config_redacted else true) | to_json }},
             "ipv4_firewall": {{
-              (molecule_incus_network_after.stdout | from_yaml).config['ipv4.firewall'] | to_json
+              molecule_incus_network_config.get('ipv4.firewall', none) | to_json
             }},
-            "ipv6_address": "none",
+            "ipv6_address": {{ (none if molecule_incus_network_config_redacted else 'none') | to_json }},
             "firewall_controller": {{ molecule_incus_firewall_controller | to_json }},
             "firewalld_runtime_zone": {{
               (
@@ -709,7 +804,8 @@
               ) | bool | to_json
             }},
             "action": {{
-              ('created' if molecule_incus_network_before.rc != 0 else 'reused') | to_json
+              ('root-precreated' if molecule_incus_is_remote
+                else ('created' if molecule_incus_network_before.rc != 0 else 'reused')) | to_json
             }},
             "used_by_before_instance_init": {{
               ((molecule_incus_network_after.stdout | from_yaml).used_by | default([])) | to_json
@@ -769,6 +865,15 @@
         or molecule_incus_existing_generic_owners.stdout | trim
           != molecule_incus_owner_effective
 
+    - name: Reconcile observed Incus instance presence with the resource plan
+      ansible.builtin.assert:
+        that:
+          - (item.rc == 0) == molecule_incus_transport_facts.plan[item.item.name].present
+        fail_msg: Incus instance inventory changed since resource preflight.
+      loop: "{{ molecule_incus_existing.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
     - name: Initialize missing Incus instances with atomic owner labels and network attachment
       ansible.builtin.command:
         argv: >-
@@ -776,6 +881,10 @@
             ['incus', 'init', item.item.image, item.item.name]
             + (['--vm'] if (item.item.type | default('container')) == 'vm' else [])
             + ['--network', molecule_incus_network_effective]
+            + ['--config', 'limits.cpu=' ~ resource_plan.cpu]
+            + ['--config', 'limits.memory=' ~ resource_plan.memory]
+            + ['--device', 'root,size=' ~ resource_plan.disk]
+            + (['--device', 'root,size.state=' ~ resource_plan.state] if resource_plan.state is not none else [])
             + ['--config', molecule_incus_owner_label ~ '=' ~ molecule_incus_owner_effective]
             + (
                 ['--config', 'user.lit-molecule-owner=' ~ molecule_incus_owner_effective]
@@ -792,6 +901,8 @@
       loop_control:
         label: "{{ item.item.name }}"
       when: item.rc != 0
+      vars:
+        resource_plan: "{{ molecule_incus_transport_facts.plan[item.item.name] }}"
       changed_when: true
 
     - name: Reconcile the compatible exact-owner label on exact-owned reruns
@@ -1010,6 +1121,11 @@
       loop_control:
         label: "{{ item.0.name }}:{{ item.1.key }}"
       changed_when: true
+      # Scenarios can select a VM at runtime while retaining their container
+      # baseline. UID maps isolate containers; they are not VM configuration.
+      when: >-
+        not ((item.0.type | default('container')) == 'vm'
+        and item.1.key == 'security.idmap.isolated')
 
     - name: Apply requested Incus CPU limit
       ansible.builtin.command:
@@ -1018,9 +1134,7 @@
           - config
           - set
           - "{{ item.name }}"
-          - >-
-            limits.cpu={{ (item.resources | default({})).cpu
-            | default(molecule_incus_default_cpu) }}
+          - "limits.cpu={{ molecule_incus_transport_facts.plan[item.name].cpu }}"
       loop: "{{ molecule_incus_instances }}"
       loop_control:
         label: "{{ item.name }}"
@@ -1033,9 +1147,7 @@
           - config
           - set
           - "{{ item.name }}"
-          - >-
-            limits.memory={{ (item.resources | default({})).memory
-            | default(molecule_incus_default_memory) }}
+          - "limits.memory={{ molecule_incus_transport_facts.plan[item.name].memory }}"
       loop: "{{ molecule_incus_instances }}"
       loop_control:
         label: "{{ item.name }}"
@@ -1069,10 +1181,9 @@
             }}
           - "{{ item.item.name }}"
           - root
-          - >-
-            size={{ (item.item.resources | default({})).disk
-            | default(molecule_incus_default_disk) }}
+          - "size={{ molecule_incus_transport_facts.plan[item.item.name].disk }}"
       loop: "{{ molecule_incus_local_devices.results }}"
+      when: molecule_incus_transport_facts.plan[item.item.name].resize_root
       loop_control:
         label: "{{ item.item.name }}"
       changed_when: true
@@ -1098,7 +1209,7 @@
           - /bin/sh
           - -c
           - >-
-            incus start "$1" >/dev/null 2>&1 || true;
+            {{ '' if molecule_incus_is_remote else 'incus start "$1" >/dev/null 2>&1 || true;' }}
             incus exec "$1" -- /bin/true
           - molecule-incus-readiness
           - "{{ item.name }}"
@@ -1176,7 +1287,7 @@
           - molecule-incus-static-ipv4
           - >-
             {{
-              (molecule_incus_network_after.stdout | from_yaml).config['ipv4.address']
+              molecule_incus_network_config['ipv4.address']
             }}
           - "{{ molecule_incus_fallback_index + 10 }}"
       loop: "{{ molecule_incus_ipv4_ready.results }}"
@@ -1254,8 +1365,7 @@
           - /etc/resolv.conf
         stdin: |-
           nameserver {{
-            (molecule_incus_network_after.stdout | from_yaml).config['ipv4.address']
-            | split('/') | first
+            molecule_incus_network_config['ipv4.address'] | split('/') | first
           }}
           options timeout:2 attempts:3
         stdin_add_newline: true
@@ -1327,16 +1437,23 @@
             "network_type": "bridge",
             "managed": true,
             "owner_label": "user.lit-molecule-owner",
-            "exact_owner_match": true,
+            "network_config_visibility": {{
+              ('redacted' if molecule_incus_network_config_redacted else 'visible') | to_json
+            }},
+            "used_by_visibility": {{ ('lease-visible' if molecule_incus_is_remote else 'local-admin') | to_json }},
+            "network_config_source": {{
+              ('root-signed-runtime' if molecule_incus_network_config_redacted else 'visible-api') | to_json
+            }},
+            "exact_owner_match": {{ (none if molecule_incus_network_config_redacted else true) | to_json }},
             "ipv4_address": {{
-              (molecule_incus_network_after.stdout | from_yaml).config['ipv4.address'] | to_json
+              molecule_incus_network_config.get('ipv4.address', none) | to_json
             }},
-            "ipv4_dhcp": true,
-            "ipv4_nat": true,
+            "ipv4_dhcp": {{ (none if molecule_incus_network_config_redacted else true) | to_json }},
+            "ipv4_nat": {{ (none if molecule_incus_network_config_redacted else true) | to_json }},
             "ipv4_firewall": {{
-              (molecule_incus_network_after.stdout | from_yaml).config['ipv4.firewall'] | to_json
+              molecule_incus_network_config.get('ipv4.firewall', none) | to_json
             }},
-            "ipv6_address": "none",
+            "ipv6_address": {{ (none if molecule_incus_network_config_redacted else 'none') | to_json }},
             "firewall_controller": {{ molecule_incus_firewall_controller | to_json }},
             "firewalld_runtime_zone": {{
               (
@@ -1346,7 +1463,8 @@
               ) | to_json
             }},
             "action": {{
-              ('created' if molecule_incus_network_before.rc != 0 else 'reused') | to_json
+              ('root-precreated' if molecule_incus_is_remote
+                else ('created' if molecule_incus_network_before.rc != 0 else 'reused')) | to_json
             }},
             "attached_instances": {{
               molecule_incus_instances | map(attribute='name') | list | to_json

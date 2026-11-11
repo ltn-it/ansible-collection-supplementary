@@ -202,6 +202,21 @@
               )
           }}
 
+    - name: Qualify the explicit Incus transport before lifecycle access
+      ansible.builtin.include_tasks: >-
+        {{
+          lookup(
+            'ansible.builtin.first_found',
+            {
+              'files': [
+                playbook_dir ~ '/transport.yml',
+                playbook_dir ~ '/../shared/incus/transport.yml',
+                playbook_dir ~ '/../incus/transport.yml'
+              ]
+            }
+          )
+        }}
+
     - name: Generate a unique evidence event timestamp
       ansible.builtin.command:
         argv:

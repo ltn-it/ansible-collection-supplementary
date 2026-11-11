@@ -4,6 +4,12 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
@@ -40,6 +46,72 @@ def task_named(tasks: list[dict[str, Any]], name: str) -> dict[str, Any]:
 
 
 class IncusLifecycleTests(unittest.TestCase):
+    def test_actual_configuration_task_keeps_container_idmaps_out_of_vm_commands(self) -> None:
+        task = task_named(load_play_tasks("create.yml"), "Apply requested Incus instance configuration")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            recorder = root / "record.py"
+            calls = root / "calls.jsonl"
+            recorder.write_text(
+                "import json,os,sys\n"
+                "with open(os.environ['INCUS_CONFIG_CALLS'],'a') as f:"
+                "f.write(json.dumps(sys.argv[1:])+'\\n')\n"
+            )
+            # Replace only the executable with an inert recorder. The real
+            # task's loop, condition and argv templating run inside Ansible.
+            command = task["ansible.builtin.command"]["argv"]
+            task["ansible.builtin.command"]["argv"] = [sys.executable, str(recorder), *command[1:]]
+            task["environment"] = {"INCUS_CONFIG_CALLS": str(calls)}
+            common = [{"key": "security.nesting", "value": "true"}, {"key": "security.idmap.isolated", "value": "true"}]
+            platforms = [
+                {"name": "vm", "type": "vm", "config": common},
+                {"name": "container", "type": "container", "config": common},
+                {"name": "legacy", "config": common},
+            ]
+            play = root / "configuration.yml"
+            play.write_text(
+                yaml.safe_dump(
+                    [
+                        {
+                            "name": "Inert typed configuration fixture",
+                            "hosts": "localhost",
+                            "connection": "local",
+                            "gather_facts": False,
+                            "vars": {"molecule_incus_instances": platforms},
+                            "tasks": [task],
+                        }
+                    ]
+                )
+            )
+            environment = dict(
+                os.environ, ANSIBLE_HOME=str(root / "home"), ANSIBLE_LOCAL_TEMP=str(root / "ansible-tmp")
+            )
+            environment.pop("ANSIBLE_CONFIG", None)
+            ansible = shutil.which("ansible-playbook")
+            self.assertIsNotNone(ansible)
+            # Exact EE executable and generated inert fixture; no shell or external input.
+            result = subprocess.run(  # noqa: S603
+                [ansible, "-i", "localhost,", str(play)],
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            observed = [json.loads(line) for line in calls.read_text().splitlines()]
+            self.assertCountEqual(
+                [
+                    ["config", "set", "vm", "security.nesting=true"],
+                    ["config", "set", "container", "security.nesting=true"],
+                    ["config", "set", "container", "security.idmap.isolated=true"],
+                    ["config", "set", "legacy", "security.nesting=true"],
+                    ["config", "set", "legacy", "security.idmap.isolated=true"],
+                ],
+                observed,
+            )
+
     def test_legacy_pruner_never_accesses_incus_for_any_run_order(self) -> None:
         # A newer run must not kill an older run; an attempt shares its run ID.
         for run_id in ("41", "42", "35703209227"):
@@ -92,7 +164,7 @@ class IncusLifecycleTests(unittest.TestCase):
         network_argv = str(network_create["ansible.builtin.command"]["argv"])
         self.assertIn("'incus', 'network', 'create'", network_argv)
         self.assertIn("user.lit-molecule-owner=", network_argv)
-        self.assertEqual(3, network_create["retries"])
+        self.assertEqual("{{ 0 if molecule_incus_is_remote else 3 }}", network_create["retries"])
         self.assertEqual(10, network_create["delay"])
         self.assertEqual("molecule_incus_network_create.rc == 0", network_create["until"])
 
@@ -135,7 +207,7 @@ class IncusLifecycleTests(unittest.TestCase):
         postcondition = task_named(tasks, "Fail closed when exact-owned Incus resources remain")
         assertions = postcondition["ansible.builtin.assert"]["that"]
         self.assertIn("molecule_incus_remaining_exact_owned_instances | length == 0", assertions)
-        self.assertIn("molecule_incus_remaining_exact_owned_networks | length == 0", assertions)
+        self.assertIn("molecule_incus_remaining_exact_owned_networks | length == 0", str(assertions))
         self.assertIn("molecule_incus_remaining_network_owner", str(assertions))
 
     def test_network_lifecycle_evidence_is_recorded_in_every_phase(self) -> None:

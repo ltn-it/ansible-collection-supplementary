@@ -1,0 +1,5 @@
+---
+bugfixes:
+  - >-
+    Account for Incus VM state filesystems before creation and apply CPU, RAM,
+    root and VM state limits in the initial create request.

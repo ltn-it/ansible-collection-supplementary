@@ -2887,6 +2887,7 @@ scenarios:
       dependencies: []
   keycloak-application-acceptance:
     profile: "application_acceptance"
+    instance_type: "vm"
     state: "supported"
     implementation: "real"
     roles:
@@ -2906,6 +2907,7 @@ scenarios:
       dependencies: []
   keycloak-heavy:
     profile: "heavy"
+    instance_type: "vm"
     state: "supported"
     implementation: "real"
     roles:

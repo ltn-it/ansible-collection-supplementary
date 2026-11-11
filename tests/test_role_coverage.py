@@ -289,6 +289,7 @@ class RoleCoverageRegistryTests(unittest.TestCase):
                 self.assertTrue(cell["release_required"])
                 self.assertEqual(["keycloak_cac", "keycloak_deploy"], cell["roles"])
                 self.assertIn("instance_type", cell)
+                self.assertEqual("container" if profile == "tiny" else "vm", cell["instance_type"])
                 self.assertIsInstance(cell["runner"], list)
                 self.assertTrue(("image" in cell) ^ ("image_variable" in cell))
                 self.assertTrue(cell["junit"] and cell["allure"] and cell["evidence"])
@@ -324,6 +325,53 @@ class RoleCoverageRegistryTests(unittest.TestCase):
                 self.assertEqual("candidate", cell["target_disposition"])
                 self.assertFalse(cell["release_required"])
                 self.assertEqual(["keycloak_cac", "keycloak_deploy"], cell["roles"])
+
+    def test_only_supported_heavy_and_acceptance_scenarios_override_target_instance_type(self) -> None:
+        overrides = {
+            name: scenario["instance_type"]
+            for name, scenario in self.registry["scenarios"].items()
+            if "instance_type" in scenario
+        }
+        self.assertEqual({"keycloak-heavy": "vm", "keycloak-application-acceptance": "vm"}, overrides)
+        self.assertTrue(all(target["instance_type"] == "container" for target in self.registry["targets"].values()))
+        for profile in VALIDATOR.PROFILES:
+            supported = VALIDATOR.build_matrix(self.registry, profile)["include"]
+            self.assertEqual(1, len(supported))
+            self.assertEqual("ubuntu-24.04", supported[0]["target"])
+            self.assertEqual(["keycloak_cac", "keycloak_deploy"], supported[0]["roles"])
+            self.assertTrue(supported[0]["release_required"])
+            candidates = VALIDATOR.build_matrix(self.registry, profile, target_disposition="candidate")["include"]
+            self.assertEqual({"rhel-9", "rhel-10"}, {cell["target"] for cell in candidates})
+            self.assertTrue(
+                all(
+                    cell["instance_type"] == ("container" if profile == "tiny" else "vm")
+                    and not cell["release_required"]
+                    for cell in candidates
+                )
+            )
+
+    def test_scenario_instance_type_falls_back_only_when_absent(self) -> None:
+        registry = deepcopy(self.registry)
+        del registry["scenarios"]["keycloak-heavy"]["instance_type"]
+        old = VALIDATOR.build_matrix(registry, "heavy")["include"][0]
+        current = VALIDATOR.build_matrix(self.registry, "heavy")["include"][0]
+        self.assertEqual("container", old["instance_type"])
+        self.assertEqual(old | {"instance_type": "vm"}, current)
+        self.assertEqual(VALIDATOR.build_matrix(registry, "tiny"), VALIDATOR.build_matrix(self.registry, "tiny"))
+
+    def test_explicit_invalid_instance_type_denies_without_silent_target_fallback(self) -> None:
+        for invalid in (None, True, 1, "", "machine", [], {}):
+            registry = deepcopy(self.registry)
+            registry["scenarios"]["keycloak-heavy"]["instance_type"] = invalid
+            errors = VALIDATOR.validate_registry(
+                ROOT, registry, check_generated=False, check_governance=False, check_role_local=False
+            )
+            self.assertTrue(
+                any("scenario keycloak-heavy.instance_type must be container or vm" in error for error in errors),
+                errors,
+            )
+            with self.assertRaisesRegex(ValueError, "instance_type must be container or vm"):
+                VALIDATOR.build_matrix(registry, "heavy")
 
     def test_aap_overlay_exactly_covers_registry_and_role_references(self) -> None:
         expected = {
