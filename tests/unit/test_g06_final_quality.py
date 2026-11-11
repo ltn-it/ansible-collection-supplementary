@@ -113,6 +113,59 @@ class FinalQualityTests(unittest.TestCase):
         with self.assertRaises(FinalQualityError):
             self.verify(self.envelope(), native_execution={**self.execution, "job_id": 9999})
 
+    def test_exact_integer_fields_reject_boolean_even_with_matching_native_values(self):
+        paths = (
+            ("schema",),
+            ("run_attempt",),
+            ("run_id",),
+            ("repository_id",),
+            ("execution", "job_id"),
+            ("execution", "check_run_id"),
+            ("execution", "completed_at"),
+            ("artifact", "id"),
+            ("artifact", "size_in_bytes"),
+            ("cleanup", "closed_at"),
+            ("issued_at",),
+        )
+        for path in paths:
+            payload = copy.deepcopy(self.payload)
+            payload["execution"]["completed_at"] = 1
+            payload["cleanup"]["closed_at"] = 1
+            payload["issued_at"] = 1
+            selected = payload if len(path) == 1 else payload[path[0]]
+            selected[path[-1]] = True
+            expected = copy.deepcopy(self.expected)
+            if len(path) == 1 and path[0] in expected:
+                expected[path[0]] = True
+            with self.subTest(path=path), self.assertRaises(FinalQualityError):
+                self.verify(
+                    self.envelope(payload),
+                    expected=expected,
+                    native_execution=payload["execution"],
+                    native_artifact=payload["artifact"],
+                )
+        envelope = self.envelope()
+        envelope["schema"] = True
+        with self.assertRaises(FinalQualityError):
+            self.verify(envelope)
+
+    def test_equal_integer_subclass_and_float_do_not_replace_exact_integer(self):
+        class IntegerSubclass(int):
+            pass
+
+        for value in (IntegerSubclass(1), True, 1.0):
+            envelope = self.envelope()
+            envelope["schema"] = value
+            with self.subTest(envelope_type=type(value)), self.assertRaises(FinalQualityError):
+                self.verify(envelope)
+        for field in ("run_attempt", "run_id", "repository_id"):
+            expected = {**self.expected, field: IntegerSubclass(self.expected[field])}
+            with self.subTest(expected=field), self.assertRaises(FinalQualityError):
+                self.verify(self.envelope(), expected=expected)
+        payload = {**self.payload, "run_attempt": 1.0}
+        with self.assertRaises(FinalQualityError):
+            self.verify(self.envelope(payload))
+
     def test_wrong_signature_and_other_signing_purpose_are_rejected(self):
         self.key = Ed25519PrivateKey.generate()
         with self.assertRaises(InvalidSignature):

@@ -818,7 +818,7 @@ jobs:
       actions: read
       checks: read
       id-token: write
-    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@c93a2085eee52e3002b519244eaede5acf635006
+    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@f6966a9b537e97b2ef5cea68286d60fd7d1a0696
     with:
       profile: heavy
       matrix-json: ${{ needs.quality-matrix.outputs.heavy }}
@@ -866,7 +866,7 @@ jobs:
       actions: read
       checks: read
       id-token: write
-    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@c93a2085eee52e3002b519244eaede5acf635006
+    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@f6966a9b537e97b2ef5cea68286d60fd7d1a0696
     with:
       profile: application_acceptance
       matrix-json: ${{ needs.quality-matrix.outputs.acceptance }}
@@ -915,7 +915,7 @@ jobs:
       actions: read
       checks: read
       id-token: write
-    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@c93a2085eee52e3002b519244eaede5acf635006
+    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@f6966a9b537e97b2ef5cea68286d60fd7d1a0696
     with:
       profile: operating
       operating-case: failure
@@ -941,7 +941,7 @@ jobs:
       actions: read
       checks: read
       id-token: write
-    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@c93a2085eee52e3002b519244eaede5acf635006
+    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@f6966a9b537e97b2ef5cea68286d60fd7d1a0696
     with:
       profile: operating
       operating-case: broker-cancel
@@ -967,7 +967,7 @@ jobs:
       actions: read
       checks: read
       id-token: write
-    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@c93a2085eee52e3002b519244eaede5acf635006
+    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@f6966a9b537e97b2ef5cea68286d60fd7d1a0696
     with:
       profile: operating
       operating-case: expiry-controller-loss
@@ -984,7 +984,7 @@ jobs:
       TINY_REQUIRED: ${{ needs.quality-matrix.outputs.tiny_required }}
       HEAVY_REQUIRED: ${{ needs.quality-matrix.outputs.heavy_required }}
       ACCEPTANCE_REQUIRED: ${{ needs.quality-matrix.outputs.acceptance_required }}
-      G06_VALIDATION_CONTROLLER_SHA: c93a2085eee52e3002b519244eaede5acf635006
+      G06_VALIDATION_CONTROLLER_SHA: f6966a9b537e97b2ef5cea68286d60fd7d1a0696
     # Aggregate only the same-run protected-main evidence. Central reusable
     # jobs publish their artifacts into this caller workflow run.
     if: >-

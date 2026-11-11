@@ -1,5 +1,8 @@
 """Verify Root's final receipt against independently read native job/artifact facts."""
 
+# Exact JSON integer types must reject bools and subclasses at the signed/native boundary.
+# pylint: disable=unidiomatic-typecheck
+
 from __future__ import annotations
 
 import argparse
