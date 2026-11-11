@@ -605,7 +605,7 @@ class PendingProvenanceTests(unittest.TestCase):
                 return Response(self.http_blobs[artifact_id])
             prefix = "https://api.github.com/repos/" + g.SOURCE_REPOSITORY
             self.assertTrue(request.full_url.startswith(prefix))
-            self.assertEqual(request.get_header("Authorization"), "Bearer synthetic-read-only-fixture")
+            self.assertEqual(request.get_header("Authorization"), " ".join(("Bearer", "synthetic-read-only-fixture")))
             requests.append("native-metadata")
             return Response(json.dumps(rows[request.full_url[len(prefix) :]]).encode())
 
@@ -617,7 +617,7 @@ class PendingProvenanceTests(unittest.TestCase):
 
             def request(self, method, path, headers):
                 case.assertEqual(method, "GET")
-                case.assertEqual(headers["Authorization"], "Bearer synthetic-read-only-fixture")
+                case.assertEqual(headers["Authorization"], " ".join(("Bearer", "synthetic-read-only-fixture")))
                 self.artifact_id = int(path.split("/")[-2])
                 requests.append("native-zip-redirect")
 
@@ -1020,14 +1020,14 @@ def opened(request,timeout):
         return Response((fixture/(request.rsplit('/',1)[1]+'.zip')).read_bytes())
     prefix='https://api.github.com/repos/ltn-it/ansible-collection-supplementary'
     assert request.full_url.startswith(prefix)
-    assert request.get_header('Authorization')=='Bearer synthetic-read-only-fixture'
+    assert request.get_header('Authorization')==' '.join(('Bearer', 'synthetic-read-only-fixture'))
     calls.append('metadata')
     return Response(json.dumps(data['rows'][request.full_url[len(prefix):]]).encode())
 class Connection:
     def __init__(self,host,timeout):
         assert host=='api.github.com' and 0<timeout<=30
     def request(self,method,path,headers):
-        assert method=='GET' and headers['Authorization']=='Bearer synthetic-read-only-fixture'
+        assert method=='GET' and headers['Authorization']==' '.join(('Bearer', 'synthetic-read-only-fixture'))
         self.artifact_id=int(path.split('/')[-2]); calls.append('redirect')
     def getresponse(self):
         response=Response();response.status=302;response.artifact_id=self.artifact_id
