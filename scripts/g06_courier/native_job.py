@@ -59,13 +59,13 @@ def api(path, token, expected=200):
 def config(path):
     value = decode(path.read_bytes())
     need(
-        type(value) is dict
+        isinstance(value, dict)
         and set(value)
         == {"schema", "operation", "public_key_pem", "public_key_sha256", "controller_commit_sha", "hold_seconds"}
         and value["schema"] == 1
-        and type(value["schema"]) is int
+        and (isinstance(value["schema"], int) and not isinstance(value["schema"], bool))
         and value["hold_seconds"] == 900
-        and type(value["hold_seconds"]) is int
+        and (isinstance(value["hold_seconds"], int) and not isinstance(value["hold_seconds"], bool))
         and re.fullmatch("[a-f0-9]{32}", value["operation"])
         and re.fullmatch("[a-f0-9]{40}", value["controller_commit_sha"]),
         "courier-public-config",
@@ -122,7 +122,7 @@ def prepare():
         for field in ("actor", "triggering_actor"):
             actor = current.get(field, {})
             need(
-                type(actor.get("id")) is int
+                (isinstance(actor.get("id"), int) and not isinstance(actor.get("id"), bool))
                 and actor["id"] in ACTORS
                 and actor.get("type") == "User"
                 and actor.get("login") == ACTORS[actor["id"]],
@@ -141,7 +141,7 @@ def prepare():
     api("/repos/" + V + "/tarball/" + public["controller_commit_sha"], token, 302)
     artifacts = api("/repos/" + REPO + "/actions/runs/" + str(run_id) + "/artifacts?per_page=100", token)
     need(
-        type(artifacts.get("total_count")) is int
+        (isinstance(artifacts.get("total_count"), int) and not isinstance(artifacts.get("total_count"), bool))
         and artifacts["total_count"] <= 100
         and len(artifacts.get("artifacts", [])) == artifacts["total_count"],
         "courier-artifact-inventory",
@@ -156,7 +156,7 @@ def prepare():
         and candidate.get("workflow_run", {}).get("id") == run_id
         and candidate.get("workflow_run", {}).get("head_sha") == sha
         and re.fullmatch("sha256:[a-f0-9]{64}", candidate.get("digest", ""))
-        and type(candidate.get("size_in_bytes")) is int
+        and (isinstance(candidate.get("size_in_bytes"), int) and not isinstance(candidate.get("size_in_bytes"), bool))
         and candidate["size_in_bytes"] > 0,
         "courier-candidate-binding",
     )
@@ -167,7 +167,9 @@ def prepare():
             "/repos/" + REPO + "/actions/runs/" + str(run_id) + "/attempts/1/jobs?per_page=100&page=" + str(page), token
         )
         need(
-            type(frame.get("total_count")) is int and frame["total_count"] <= 1000 and type(frame.get("jobs")) is list,
+            (isinstance(frame.get("total_count"), int) and not isinstance(frame.get("total_count"), bool))
+            and frame["total_count"] <= 1000
+            and isinstance(frame.get("jobs"), list),
             "courier-job-inventory",
         )
         jobs.extend(frame["jobs"])
@@ -254,7 +256,10 @@ if __name__ == "__main__":
     except Exception as error:
         print(
             json.dumps(
-                {"state": "COURIER_HELD", "category": str(error) if type(error) is ValueError else type(error).__name__}
+                {
+                    "state": "COURIER_HELD",
+                    "category": str(error) if isinstance(error, ValueError) else type(error).__name__,
+                }
             )
         )
         raise SystemExit(2) from None

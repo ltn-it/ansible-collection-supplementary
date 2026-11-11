@@ -52,7 +52,7 @@ def decode(raw):
             value[key] = item
         return value
 
-    need(type(raw) is bytes and len(raw) <= 32768, "courier-bound")
+    need(isinstance(raw, bytes) and len(raw) <= 32768, "courier-bound")
     return json.loads(raw, object_pairs_hook=unique)
 
 
@@ -72,7 +72,7 @@ def public_digest(key):
 
 
 def validate(binding, now):
-    need(type(binding) is dict and set(binding) == BINDING_FIELDS, "courier-binding-fields")
+    need(isinstance(binding, dict) and set(binding) == BINDING_FIELDS, "courier-binding-fields")
     for key, length in (
         ("operation", 32),
         ("key_sha256", 64),
@@ -81,7 +81,7 @@ def validate(binding, now):
         ("controller_sha", 40),
     ):
         need(
-            type(binding[key]) is str and re.fullmatch("[a-f0-9]{" + str(length) + "}", binding[key]),
+            isinstance(binding[key], str) and re.fullmatch("[a-f0-9]{" + str(length) + "}", binding[key]),
             "courier-binding-digest",
         )
     for key in (
@@ -96,7 +96,10 @@ def validate(binding, now):
         "issued_at",
         "cutoff_at",
     ):
-        need(type(binding[key]) is int and binding[key] > 0, "courier-binding-number")
+        need(
+            (isinstance(binding[key], int) and not isinstance(binding[key], bool)) and binding[key] > 0,
+            "courier-binding-number",
+        )
     need(binding["transition_before"] == TRANSITION_BEFORE, "courier-intended-main-transition")
     need(
         binding["repository"] == "ltn-it/ansible-collection-supplementary"
@@ -117,7 +120,7 @@ def seal(token, binding, pem, now=None):
     now = int(time.time()) if now is None else now
     validate(binding, now)
     need(
-        type(token) is str and 20 <= len(token) <= 16384 and all(32 < ord(char) < 127 for char in token),
+        isinstance(token, str) and 20 <= len(token) <= 16384 and all(32 < ord(char) < 127 for char in token),
         "courier-token-shape",
     )
     key = public_key(pem)
@@ -147,9 +150,9 @@ def open_handoff(raw, key, expected, now=None):
     validate(expected, now)
     value = decode(raw)
     need(
-        type(value) is dict
+        isinstance(value, dict)
         and set(value) == {"schema", "binding", "wrapped_key", "nonce", "ciphertext"}
-        and type(value["schema"]) is int
+        and (isinstance(value["schema"], int) and not isinstance(value["schema"], bool))
         and value["schema"] == 1
         and value["binding"] == expected,
         "courier-exact-expected-binding",
@@ -170,10 +173,10 @@ def open_handoff(raw, key, expected, now=None):
     need(len(nonce) == 12 and len(secret) == 32, "courier-envelope-shape")
     payload = decode(AESGCM(secret).decrypt(nonce, decode64("ciphertext"), aad))
     need(
-        type(payload) is dict
+        isinstance(payload, dict)
         and set(payload) == {"binding", "token"}
         and payload["binding"] == expected
-        and type(payload["token"]) is str
+        and isinstance(payload["token"], str)
         and 20 <= len(payload["token"]) <= 16384
         and all(32 < ord(c) < 127 for c in payload["token"]),
         "courier-payload-binding",

@@ -55,6 +55,7 @@ def prepare():
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             timeout=remaining,
+            check=False,
             env=env,
         )
         need(len(result.stdout) <= 2 * 1024**2, "courier-ee-pull-output-bound")
@@ -78,7 +79,7 @@ if __name__ == "__main__":
             json.dumps(
                 {
                     "state": "COURIER_PREPULL_HELD",
-                    "category": str(error) if type(error) is ValueError else type(error).__name__,
+                    "category": str(error) if isinstance(error, ValueError) else type(error).__name__,
                 }
             )
         )

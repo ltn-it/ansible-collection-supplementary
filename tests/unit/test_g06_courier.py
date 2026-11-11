@@ -106,6 +106,26 @@ class CourierCodec(unittest.TestCase):
         sealed = codec.seal("SYNTHETIC-BEARER-DO-NOT-USE", binding, cfg["public_key_pem"].encode(), 1000)
         self.assertEqual(json.loads(sealed)["binding"], binding)
 
+    def test_json_booleans_cannot_impersonate_native_numeric_identity(self):
+        for field in (
+            "repository_id",
+            "workflow_id",
+            "run_id",
+            "run_attempt",
+            "courier_job_id",
+            "actor_id",
+            "candidate_artifact_id",
+            "candidate_size",
+            "issued_at",
+            "cutoff_at",
+        ):
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "courier-binding-number"):
+                codec.validate({**self.binding, field: True}, 1000)
+        sealed = json.loads(codec.seal("SYNTHETIC-BEARER-DO-NOT-USE", self.binding, self.pem, 1000))
+        sealed["schema"] = True
+        with self.assertRaisesRegex(ValueError, "courier-exact-expected-binding"):
+            codec.open_handoff(codec.canonical(sealed), self.key, self.binding, 1001)
+
     def test_duplicate_json_fields_deny(self):
         with self.assertRaisesRegex(ValueError, "duplicate-field"):
             codec.decode(b'{"schema":1,"schema":2}')
