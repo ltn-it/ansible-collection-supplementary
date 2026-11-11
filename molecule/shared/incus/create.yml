@@ -1222,6 +1222,42 @@
       delay: 2
       changed_when: false
 
+    - name: Read the single guest network interface before configuring IPv4
+      ansible.builtin.command:
+        argv:
+          - incus
+          - exec
+          - "{{ item.name }}"
+          - --
+          - /bin/sh
+          - -c
+          - >-
+            interface=;
+            for path in /sys/class/net/*; do
+              name=${path##*/};
+              [ "$name" = lo ] && continue;
+              [ -e "$path/ifindex" ] || continue;
+              if [ -n "$interface" ]; then
+                echo 'Ambiguous guest network interfaces' >&2; exit 1;
+              fi;
+              interface=$name;
+            done;
+            [ -n "$interface" ] || { echo 'No guest network interface' >&2; exit 1; };
+            printf '%s\n' "$interface"
+      loop: "{{ molecule_incus_instances }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: molecule_incus_guest_interface_observations
+      changed_when: false
+
+    - name: Bind the observed guest interface to each exact-owned instance
+      ansible.builtin.set_fact:
+        molecule_incus_guest_interfaces: >-
+          {{ molecule_incus_guest_interfaces | default({}) | combine({item.item.name: item.stdout | trim}) }}
+      loop: "{{ molecule_incus_guest_interface_observations.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
     - name: Reassert guest DHCP after attaching the isolated network
       ansible.builtin.command:
         argv:
@@ -1232,9 +1268,11 @@
           - /bin/sh
           - -c
           - >-
-            ip link set eth0 up &&
-            (networkctl reconfigure eth0 || true) &&
-            (networkctl renew eth0 || true)
+            ip link set "$1" up &&
+            (networkctl reconfigure "$1" || true) &&
+            (networkctl renew "$1" || true)
+          - molecule-incus-dhcp
+          - "{{ molecule_incus_guest_interfaces[item.name] }}"
       loop: "{{ molecule_incus_instances }}"
       loop_control:
         label: "{{ item.name }}"
@@ -1281,15 +1319,16 @@
             gateway=$(python3 -c
             'import ipaddress,sys; print(ipaddress.ip_interface(sys.argv[1]).ip)'
             "$1") &&
-            ip link set eth0 up &&
-            ip address replace "$guest_cidr" dev eth0 &&
-            ip route replace default via "$gateway" dev eth0
+            ip link set "$3" up &&
+            ip address replace "$guest_cidr" dev "$3" &&
+            ip route replace default via "$gateway" dev "$3"
           - molecule-incus-static-ipv4
           - >-
             {{
               molecule_incus_network_config['ipv4.address']
             }}
           - "{{ molecule_incus_fallback_index + 10 }}"
+          - "{{ molecule_incus_guest_interfaces[item.item.name] }}"
       loop: "{{ molecule_incus_ipv4_ready.results }}"
       loop_control:
         label: "{{ item.item.name }}"
