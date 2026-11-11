@@ -6,10 +6,7 @@ import subprocess
 import sys
 import time
 
-IMAGE = (
-    "quay.io/l-it/ee-wunder-devtools-ubi9:v1.18.2@sha256:"
-    "58955457d3410706520f34fa7ea9823d5650aa4844c562cd5c0107024d825711"
-)
+IMAGE = "quay.io/l-it/ee-wunder-devtools-ubi9:v1.18.2@sha256:58955457d3410706520f34fa7ea9823d5650aa4844c562cd5c0107024d825711"  # noqa: E501 -- Keep the immutable image visible to source inventory.
 
 
 def need(ok, reason):
