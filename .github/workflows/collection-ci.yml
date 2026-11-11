@@ -35,6 +35,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
+  G06_COURIER_IMAGE: >-
+    quay.io/l-it/ee-wunder-devtools-ubi9:v1.18.2@sha256:58955457d3410706520f34fa7ea9823d5650aa4844c562cd5c0107024d825711
   PYTHON_VERSION: "3.11"
   ANSIBLE_CORE_VERSION: "2.18.18"
   COLLECTION_NAMESPACE: lit
@@ -2407,7 +2409,7 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/source:ro" \
             -v "${RUNNER_TEMP}/g06-courier-transport:/out:rw" --workdir /source \
             --entrypoint python3 \
-            quay.io/l-it/ee-wunder-devtools-ubi9:v1.18.2@sha256:58955457d3410706520f34fa7ea9823d5650aa4844c562cd5c0107024d825711 \
+            "$G06_COURIER_IMAGE" \
             -B scripts/g06_courier/native_job.py prepare
       - name: Upload the one encrypted temporary transport
         id: upload
@@ -2429,5 +2431,5 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/source:ro" \
             -v "${RUNNER_TEMP}/g06-courier-transport:/out:ro" --workdir /source \
             --entrypoint python3 \
-            quay.io/l-it/ee-wunder-devtools-ubi9:v1.18.2@sha256:58955457d3410706520f34fa7ea9823d5650aa4844c562cd5c0107024d825711 \
+            "$G06_COURIER_IMAGE" \
             -B scripts/g06_courier/native_job.py hold

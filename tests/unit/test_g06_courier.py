@@ -280,6 +280,7 @@ class WorkflowEntry(unittest.TestCase):
     def test_fragment_uses_same_transition_before_gate_and_pinned_ee_for_both_entries(self):
         workflow = yaml.safe_load((ROOT / ".github/workflows/collection-ci.yml").read_text())
         job = workflow["jobs"]["g06-root-courier"]
+        self.assertEqual(workflow["env"]["G06_COURIER_IMAGE"], pull_image.IMAGE)
         self.assertIn("github.event.before == '" + codec.TRANSITION_BEFORE + "'", job["if"])
         self.assertEqual(job["timeout-minutes"], 30)
         self.assertEqual(job["environment"], "ansible-collection-release-prepare")
@@ -290,13 +291,13 @@ class WorkflowEntry(unittest.TestCase):
         for step in (encrypt, hold):
             command = step["run"]
             for value in (
-                pull_image.IMAGE,
                 "--read-only",
                 "--cap-drop ALL",
                 "--security-opt no-new-privileges=true",
                 "--pull never",
             ):
                 self.assertIn(value, command)
+            self.assertIn('"$G06_COURIER_IMAGE"', command)
             self.assertNotIn("docker.sock", command)
         self.assertIn("--network none", hold["run"])
         self.assertNotIn("GITHUB_TOKEN", hold["run"])

@@ -4,7 +4,7 @@ The protected Supplementary Main build supplies its own short-lived, read-only j
 credential to the existing Root generation acquisition on ciwkr01. The public RSA
 binding in `.lit/g06-courier.json` belongs to one fresh Root-owned tmpfs key. The
 courier is restricted to the reviewed transition from Main `90e7216b` and attempt
-one. The collection package excludes this CI directory and `.lit`.
+one. The collection package excludes `.lit` and its public binding.
 
 The hosted job waits at `ansible-collection-release-prepare`. Before approving
 that exact job, the operator verifies the new Main/candidate, accepted Validation
