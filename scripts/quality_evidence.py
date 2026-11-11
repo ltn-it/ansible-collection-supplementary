@@ -3011,7 +3011,7 @@ def _version_environment() -> tuple[dict[str, str], dict[str, str]]:
     return dict(sorted(tools.items())), dict(sorted(applications.items()))
 
 
-def _prerequisite_statuses() -> tuple[dict[str, str], list[str]]:
+def _prerequisite_statuses(*, preliminary: bool = False) -> tuple[dict[str, str], list[str]]:
     raw = os.getenv("QUALITY_EVIDENCE_PREREQUISITES_JSON") or os.getenv("QUALITY_EVIDENCE_PREREQUISITES")
     if not raw:
         return {}, []
@@ -3029,7 +3029,7 @@ def _prerequisite_statuses() -> tuple[dict[str, str], list[str]]:
             errors.append(f"unknown mandatory prerequisite status: {name}")
         status = value if isinstance(value, str) else str(value)
         statuses[name] = status
-        if status != "success":
+        if status != "success" and not (preliminary and name == "destroy" and status == "pending"):
             errors.append(f"mandatory prerequisite {name} concluded {status or 'unknown'}")
     for name in MANDATORY_PREREQUISITES:
         if name not in statuses:
@@ -3188,7 +3188,7 @@ def _evaluate_expected(expected: list[dict[str, Any]], actual: Sequence[dict[str
     return blockers
 
 
-def _manifest_logic_failures(manifest: dict[str, Any], *, release_mode: bool) -> list[str]:
+def _manifest_logic_failures(manifest: dict[str, Any], *, release_mode: bool, preliminary: bool = False) -> list[str]:
     failures: list[str] = []
     results = manifest.get("results", [])
     if not isinstance(results, list) or not results:
@@ -3264,7 +3264,7 @@ def _manifest_logic_failures(manifest: dict[str, Any], *, release_mode: bool) ->
         if names and names != set(MANDATORY_PREREQUISITES):
             failures.append("mandatory prerequisite status names are incomplete or unknown")
         for name, status in prerequisites.items():
-            if status != "success":
+            if status != "success" and not (preliminary and name == "destroy" and status == "pending"):
                 failures.append(f"mandatory prerequisite {name} did not succeed")
     return sorted(set(failures))
 
@@ -3283,9 +3283,12 @@ def assemble(
     run_attempt: str | None = None,
     release_mode: bool = False,
     candidate_mode: bool = False,
+    preliminary: bool = False,
     expected_commit: str | None = None,
     mandatory_scenarios: Sequence[str] = (),
 ) -> int:
+    if preliminary and release_mode:
+        raise EvidenceError("preliminary evidence cannot authorize release acceptance")
     root = root.resolve()
     repository_root = (repository_root or Path.cwd()).resolve()
     input_roots = [path.resolve() for path in (input_roots or [root.parent])]
@@ -3594,7 +3597,7 @@ def assemble(
             repository_root=repository_root,
             matrix_cells=expected,
         )
-        prerequisites, prerequisite_errors = _prerequisite_statuses()
+        prerequisites, prerequisite_errors = _prerequisite_statuses(preliminary=preliminary)
         blockers = (
             list(registry_errors)
             + parse_failures
@@ -3684,8 +3687,15 @@ def assemble(
             "release_eligible": False,
         }
         manifest = redact_strings(manifest)
-        execution_passed = not _manifest_logic_failures(manifest, release_mode=release_mode)
-        if candidate_mode:
+        execution_passed = not _manifest_logic_failures(manifest, release_mode=release_mode, preliminary=preliminary)
+        if preliminary:
+            # This is a sanitized execution export, before the native job ends.
+            # Only Root can subsequently attest terminal success and destruction.
+            manifest["root_finalization"] = "pending"
+            manifest["execution_success"] = execution_passed
+            manifest["candidate_execution_passed"] = False
+            manifest["release_eligible"] = False
+        elif candidate_mode:
             manifest["candidate_execution_passed"] = execution_passed
             manifest["release_eligible"] = False
         else:
@@ -3807,6 +3817,8 @@ def _manifest_structure_failures(manifest: dict[str, Any]) -> list[str]:
     }
     missing = sorted(required - set(manifest))
     failures.extend(f"manifest lacks required field {name}" for name in missing)
+    if manifest.get("root_finalization") == "pending":
+        failures.append("manifest awaits Root finalization and is not final quality evidence")
     if manifest.get("schema_version") != 2:
         failures.append("manifest schema_version is not 2")
     if manifest.get("mode") not in {"ci", "candidate", "release"}:
@@ -4335,6 +4347,9 @@ def build_parser(*, default_release: bool = False) -> argparse.ArgumentParser:
         default="release" if default_release else "ci",
     )
     parser.add_argument("--release", action="store_true", help="Require release supply-chain evidence")
+    parser.add_argument(
+        "--preliminary", action="store_true", help="Assemble an execution export without final quality acceptance"
+    )
     return parser
 
 
@@ -4351,6 +4366,8 @@ def main(
     candidate_mode = args.mode == "candidate"
     roles = args.role or list(default_roles)
     try:
+        if args.preliminary and args.command != "assemble":
+            raise EvidenceError("--preliminary is only valid for assemble")
         if args.command == "record":
             record_roles = [item for item in (args.roles or "").split(",") if item.strip()] or roles
             if len(args.scenario) != 1 or len(args.profile) != 1 or len(args.target) != 1:
@@ -4384,6 +4401,7 @@ def main(
                 run_attempt=args.run_attempt,
                 release_mode=release_mode,
                 candidate_mode=candidate_mode,
+                preliminary=args.preliminary,
                 expected_commit=args.expected_commit,
                 mandatory_scenarios=mandatory_scenarios,
             )

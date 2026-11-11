@@ -125,8 +125,6 @@
         "/(^|.*/)manifests/.*\\.ya?ml$/",
         "/(^|.*/)roles/.*/defaults/main\\.ya?ml$/",
         "/(^|.*/)meta/source-dependencies\\.ya?ml$/",
-        "/(^|.*/)scripts/g06_courier/pull_image\\.py$/",
-        "/(^|.*/)\\.github/workflows/collection-ci\\.ya?ml$/",
         "/(^|.*/)molecule/keycloak-(?:tiny|heavy)/(?:converge|verify)\\.ya?ml$/",
         "/(^|.*/)molecule/forward-proxy-tiny/(?:converge|verify)\\.ya?ml$/"
       ],

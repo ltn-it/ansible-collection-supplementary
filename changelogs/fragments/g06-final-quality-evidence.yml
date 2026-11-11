@@ -1,0 +1,11 @@
+bugfixes:
+  - >-
+    Keep physical Incus cell exports explicitly preliminary until Root proves successful native job completion,
+    verified evidence upload, and actual resource cleanup.
+  - >-
+    Verify final Root signatures and exact provider ZIP contents before importing direct physical evidence trees
+    into the same-run quality aggregate.
+minor_changes:
+  - >-
+    Add separate one-transition G06 operating calls for failure, broker cancellation, and real expiry.
+    These calls carry operating assertions separately from the two ordinary Keycloak business profile cells.

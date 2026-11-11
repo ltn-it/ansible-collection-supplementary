@@ -812,12 +812,12 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             self.assertEqual(
                 "ltn-it/modulix-validation/.github/workflows/"
                 "collection-quality-profile-isolated.yml@"
-                "566e97ec3828b8547c74745c1b79e53d0353b1e3",
+                "c93a2085eee52e3002b519244eaede5acf635006",
                 delegated["uses"],
             )
             self.assertNotIn("environment-name", delegated["with"])
             self.assertEqual(
-                {"contents": "read", "actions": "read", "id-token": "write"},
+                {"contents": "read", "actions": "read", "checks": "read", "id-token": "write"},
                 delegated["permissions"],
             )
             self.assertEqual(
@@ -831,6 +831,42 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             ["lint-sanity", "build-install", "role-coverage", "quality-matrix", "tiny"],
             jobs["fast"]["needs"],
         )
+
+    def test_operating_cases_are_one_transition_serial_and_separate_from_business_profiles(self) -> None:
+        jobs = load_yaml(WORKFLOWS / "collection-ci.yml")["jobs"]
+        previous = None
+        callee = jobs["heavy-cells"]["uses"]
+        for case in ("failure", "broker-cancel", "expiry-controller-loss"):
+            name = "g06-operating-" + case
+            job = jobs[name]
+            guard = job["if"]
+            for required in (
+                "github.event_name == 'push'",
+                "github.ref == 'refs/heads/main'",
+                "github.run_attempt == 1",
+                "github.event.before == '90e7216b5d085ca4ac6238e44dcdbaa51e847d5f'",
+                "github.actor_id == '76040632'",
+                "github.actor_id == '247824904'",
+                "github.triggering_actor == github.actor",
+            ):
+                self.assertIn(required, guard)
+            self.assertEqual(job["uses"], callee)
+            self.assertEqual(job["needs"], ["build-install", "heavy", "acceptance"] + ([previous] if previous else []))
+            self.assertEqual(job["permissions"], {"contents": "read", "actions": "read", "checks": "read", "id-token": "write"})
+            self.assertEqual(
+                job["with"],
+                {
+                    "profile": "operating",
+                    "operating-case": case,
+                    "matrix-json": '{"include":[]}',
+                    "candidate-artifact": "collection-candidate-${{ github.sha }}",
+                    "source-sha": "${{ github.sha }}",
+                },
+            )
+            self.assertNotIn("secrets", job)
+            self.assertNotIn("continue-on-error", job)
+            previous = name
+        self.assertEqual(jobs["runtime-evidence"]["env"]["G06_VALIDATION_CONTROLLER_SHA"], callee.rsplit("@", 1)[1])
 
     def test_protected_main_evidence_adapter_is_exact_and_fail_closed(self) -> None:
         jobs = load_yaml(WORKFLOWS / "collection-ci.yml")["jobs"]

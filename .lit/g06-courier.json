@@ -1,8 +1,0 @@
-{
-  "controller_commit_sha": "566e97ec3828b8547c74745c1b79e53d0353b1e3",
-  "hold_seconds": 900,
-  "operation": "96e125e4dfcb450ea9e771f7232b9907",
-  "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAs3nKEeMjQTI61om+O9qU\neeEGNc4ZBJrqINppNKb7VUoyJshEMO6ctKFgRdIgqOGpl55LNx+c274p/OHEpiae\nNg30iTqq1pXaOnpz9wAzLNLPvbmySaBHLh0lnDVUOI+1hO00g90P2wl8KIKv7dO8\ndT2caGpdYv7PTld3NU3FEkbY/UX7MUhEZprISLTJcQfig9xXJ7gSXG37DV3qO/wg\nNbxelhDQ4MnKf0g5v2givHLt3GUSXa3/5pjai6aGUz+yXn9v3BrDujE5dbcXYbQF\nnlGNbuQxNzIDkuBZdgRv/AbJLm1aAcAExwzRqVZfRTXyEuf4Xg7aVyJeS/gDiloZ\ny64BXQDMBNuo00qekmjlH2EV6uzi8u6meHzGTwej/jhnB/WEu2E6In/wu83Rh/K0\n9FX+lBcF+aerajVEfLWXP2xVHMGnu+q9H0SXhkPPwg+6/LAhKVmBy7ff4QPPRzOw\nCR4JP82vqc/LObOCOHb3ew52oSzfiVmIJS1RbujbXMj7AgMBAAE=\n-----END PUBLIC KEY-----\n",
-  "public_key_sha256": "2b7fc930f4e69d24c52519a26acf997c3d446f9cd30a365ec7a470a6587f7a60",
-  "schema": 1
-}
