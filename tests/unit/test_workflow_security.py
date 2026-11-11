@@ -852,7 +852,9 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                 self.assertIn(required, guard)
             self.assertEqual(job["uses"], callee)
             self.assertEqual(job["needs"], ["build-install", "heavy", "acceptance"] + ([previous] if previous else []))
-            self.assertEqual(job["permissions"], {"contents": "read", "actions": "read", "checks": "read", "id-token": "write"})
+            self.assertEqual(
+                job["permissions"], {"contents": "read", "actions": "read", "checks": "read", "id-token": "write"}
+            )
             self.assertEqual(
                 job["with"],
                 {
