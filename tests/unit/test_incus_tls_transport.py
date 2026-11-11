@@ -1006,6 +1006,73 @@ class LifecycleWiringTests(unittest.TestCase):
         self.assertIn("'' if molecule_incus_is_remote", readiness[2])
         self.assertIn("incus exec", readiness[2])
 
+    def test_guest_interface_discovery_accepts_vm_and_container_names_and_denies_ambiguity(self):
+        tasks = self.tasks("create.yml")
+        name = "Read the single guest network interface before configuring IPv4"
+        script = self.named(tasks, name)["ansible.builtin.command"]["argv"][-1]
+        self.assertLess(
+            [task.get("name") for task in tasks].index(name),
+            [task.get("name") for task in tasks].index("Reassert guest DHCP after attaching the isolated network"),
+        )
+        for interfaces, expected in (
+            (["lo", "ens3"], "ens3"),
+            (["lo", "eth0"], "eth0"),
+            (["lo"], None),
+            (["lo", "ens3", "ens4"], None),
+        ):
+            with self.subTest(interfaces=interfaces), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                for interface in interfaces:
+                    (root / interface).mkdir()
+                    (root / interface / "ifindex").write_text("1")
+                result = subprocess.run(  # noqa: S603 -- checked-in script with isolated fixture paths.
+                    ["/bin/sh", "-c", script.replace("/sys/class/net/", f"{root}/")],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if expected is None:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(result.stdout, "")
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout.strip(), expected)
+
+    def test_dhcp_and_static_fallback_use_the_observed_vm_interface(self):
+        tasks = self.tasks("create.yml")
+        dhcp = self.named(tasks, "Reassert guest DHCP after attaching the isolated network")["ansible.builtin.command"][
+            "argv"
+        ]
+        static = self.named(tasks, "Assign a deterministic isolated IPv4 address when guest DHCP is unavailable")[
+            "ansible.builtin.command"
+        ]["argv"]
+        self.assertEqual(dhcp[-1], "{{ molecule_incus_guest_interfaces[item.name] }}")
+        self.assertEqual(static[-1], "{{ molecule_incus_guest_interfaces[item.item.name] }}")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            log = root / "commands"
+            for command in ("ip", "networkctl"):
+                stub = root / command
+                stub.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$NETWORK_TEST_LOG"\n')
+                stub.chmod(0o700)
+            environment = dict(os.environ, PATH=f"{root}:{os.environ['PATH']}", NETWORK_TEST_LOG=str(log))
+            for argv in ((dhcp[6], dhcp[7], "ens3"), (static[6], static[7], "10.20.30.1/24", "10", "ens3")):
+                result = subprocess.run(  # noqa: S603 -- checked-in scripts with fixed fixture arguments.
+                    ["/bin/sh", "-c", *argv], env=environment, capture_output=True, text=True, check=False
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                log.read_text().splitlines(),
+                [
+                    "link set ens3 up",
+                    "reconfigure ens3",
+                    "renew ens3",
+                    "link set ens3 up",
+                    "address replace 10.20.30.10/24 dev ens3",
+                    "route replace default via 10.20.30.1 dev ens3",
+                ],
+            )
+
     def test_remote_write_not_blindly_retried_and_destroy_enumerates_names_only(self):
         tasks = self.tasks("create.yml")
         create = self.named(tasks, "Create the managed network with atomic exact-owner labels")

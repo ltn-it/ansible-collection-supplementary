@@ -526,6 +526,7 @@ jobs:
       queue: max
       cancel-in-progress: false
     permissions:
+      checks: read
       actions: write
       attestations: write
       contents: write
@@ -553,6 +554,12 @@ jobs:
           RELEASE_TAG_APP_PRIVATE_KEY: ${{ secrets.RELEASE_TAG_APP_PRIVATE_KEY }}
         run: |
           set -euo pipefail
+          python3 - <<'PYTHON'
+          import os
+          import time
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as stream:
+              stream.write(f"G06_FINAL_PHASE_DEADLINE={time.monotonic() + 5310:.6f}\n")
+          PYTHON
           [[ "$RELEASE_TAG_APP_ID" =~ ^[1-9][0-9]*$ ]]
           test "$RELEASE_TAG_APP_ID" != 15368
           test -n "$RELEASE_TAG_APP_CLIENT_ID"
@@ -717,7 +724,8 @@ jobs:
           set -euo pipefail
           python -m pip install --disable-pip-version-check \
             ansible-core==2.18.18 \
-            PyYAML==6.0.3
+            PyYAML==6.0.3 \
+            cryptography==50.0.0
 
       - name: Checkout immutable public native-control verifier
         if: env.NORMAL_TWO_STAGE == 'true'
@@ -885,6 +893,8 @@ jobs:
 
       - name: Validate candidate, MANIFEST, evidence, and repository policy
         env:
+          GITHUB_TOKEN: ${{ github.token }}
+          G06_VALIDATION_CONTROLLER_SHA: f6966a9b537e97b2ef5cea68286d60fd7d1a0696
           CI_RUN_ID: ${{ needs.release-validation.outputs.ci-run-id }}
           CI_RUN_ATTEMPT: ${{ needs.release-validation.outputs.ci-run-attempt }}
           REQUEST_CREATE_GITHUB_RELEASE: ${{ inputs.create_github_release }}

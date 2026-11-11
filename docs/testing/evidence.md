@@ -63,6 +63,64 @@ python3 scripts/quality_evidence.py assemble
 python3 scripts/quality_evidence.py validate
 ```
 
+## Physical finalization survives reaggregation
+
+A preliminary Root cell is diagnostic evidence (`root_finalization: pending`),
+not final quality acceptance. Copying its reports, expanding a nested transport,
+mixing reports with ordinary inputs, or assembling an existing output again
+cannot remove this barrier. Candidate inputs likewise cannot become ordinary
+final evidence by reaggregation. Ordinary offline business evidence remains
+supported.
+
+Protected-main aggregation verifies the exact Heavy/keycloak-heavy/ubuntu-24.04
+and Application Acceptance/keycloak-application-acceptance/ubuntu-24.04 pair.
+It uses the existing pinned Root public key, signed final-quality domain,
+independent native job/check/artifact records and complete provider ZIP/member
+byte comparison. The verified importer, assembler and validator run in one
+process. Its opaque verification result is bound to exact file inventories;
+constructing an object or supplying a path grants no acceptance.
+
+The final manifest retains `root_final_quality_inputs`: relative references to
+original preliminary cell trees and canonical signed envelopes below
+`root-final-inputs/<artifact-id>/`. These raw cell files are preserved unchanged,
+including their own manifests/checksums, JUnit and Allure bytes. References and
+digests locate evidence; they are not cached authorization. A later process
+must independently repeat the same native and ZIP verification using its
+normal ephemeral `GITHUB_TOKEN`, the workflow-pinned
+`G06_VALIDATION_CONTROLLER_SHA` (reusable callee B, not action A), expected
+source commit and original CI run (`CI_RUN_ID`, otherwise `GITHUB_RUN_ID`).
+Missing native access or expected controller/run information holds physical
+acceptance. Publication uses its existing authenticated original `CI_RUN_ID`.
+
+The public final-evidence JWS is distinguished from a credential only after
+this complete verification, at its exact envelope path and bytes. Only that
+signature value is masked for scanning; every receipt field and all other
+content still receive the ordinary secret scanner. Unverified/fake JWTs and
+modified envelopes are never exempt. All retained copies count toward the
+unchanged 256 MiB/file, 512 MiB total and 10,000-file limits; overflow holds.
+
+Each fresh two-cell verification needs six native metadata GETs, two API ZIP
+redirect GETs and two signed blob downloads. The same-process path avoids a
+second verification round; each independent validation/reaggregation repeats
+it. Existing 30-second request and 300-second ZIP download ceilings remain, but a
+fixed 240-second whole-verification phase is stricter. Native reads, both ZIPs,
+local verification and same-process aggregation share that monotonic deadline;
+nesting and opaque proof reuse cannot reset it. Request timeouts are clamped to
+the remaining phase. Every affected workflow starts its existing job clock
+before checkout/setup and leaves a 90-second safety reserve; verification uses
+the stricter remaining clock. Exhaustion explicitly holds, without increasing
+job timeouts or dropping checks. A blocked network read can take its bounded
+remaining request timeout to return; native whole-job qualification is still
+required before promotion.
+
+The representative two-cell fixture uses 16 MiB of deterministic public capture
+and 1,000 additional real files per cell. Real signatures, tree inventories,
+ZIP bytes and aggregation/validation execute locally; HTTP alone is modeled.
+It measures setup, verification and request counts without claiming native
+provider latency. Actual operator-configured Root capture limits and native
+whole-job timing remain required production inputs; larger evidence still
+obeys the unchanged byte/file caps and phase budget.
+
 ## Test identity and role proof
 
 Every final JUnit document identifies the tested commit with an exact lowercase

@@ -1,0 +1,12 @@
+---
+bugfixes:
+  - >-
+    Incus test lifecycle - detect the guest network interface before DHCP and static IPv4 configuration,
+    supporting VM names such as ens3 while refusing missing or ambiguous interfaces.
+minor_changes:
+  - >-
+    Protected Main CI - run Heavy and Application Acceptance serially through the isolated physical-runner
+    profile with exact Main candidate admission and job-scoped identity permissions.
+  - >-
+    G06 preparation - acquire the exact Main candidate through the authenticated job-scoped Root intake,
+    without placing a personal token or a reusable encrypted bearer transport on the runner host.
