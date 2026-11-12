@@ -812,7 +812,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             self.assertEqual(
                 "ltn-it/modulix-validation/.github/workflows/"
                 "collection-quality-profile-isolated.yml@"
-                "f6966a9b537e97b2ef5cea68286d60fd7d1a0696",
+                "1d88e96e9dd6fb5ccdb052b3e76685e538bf5c66",
                 delegated["uses"],
             )
             self.assertNotIn("environment-name", delegated["with"])
@@ -832,7 +832,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             jobs["fast"]["needs"],
         )
 
-    def test_operating_cases_are_one_transition_serial_and_separate_from_business_profiles(self) -> None:
+    def test_operating_cases_are_closed_transition_serial_and_separate_from_business_profiles(self) -> None:
         jobs = load_yaml(WORKFLOWS / "collection-ci.yml")["jobs"]
         previous = None
         callee = jobs["heavy-cells"]["uses"]
@@ -871,6 +871,63 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         self.assertEqual(
             load_yaml(WORKFLOWS / "collection-ci.yml")["env"]["G06_VALIDATION_CONTROLLER_SHA"], callee.rsplit("@", 1)[1]
         )
+
+    def test_operating_windows_execute_only_original_or_exact_functional_followup_guards(self) -> None:
+        jobs = load_yaml(WORKFLOWS / "collection-ci.yml")["jobs"]
+        original = "90e7216b5d085ca4ac6238e44dcdbaa51e847d5f"
+        followup = "14e3abd5d1fa0cfad14d52ec83483b761de207f0"
+        baseline = {
+            "repository": "ltn-it/ansible-collection-supplementary",
+            "event_name": "push",
+            "ref": "refs/heads/main",
+            "event.before": original,
+            "run_attempt": "1",
+            "actor": "litroc",
+            "actor_id": "76040632",
+            "triggering_actor": "litroc",
+        }
+        examples = [
+            ({}, True),
+            ({"event.before": followup}, True),
+            (
+                {"event.before": followup, "actor": "litdeg", "actor_id": "247824904", "triggering_actor": "litdeg"},
+                True,
+            ),
+            ({"event.before": "f" * 40}, False),
+            ({"event.before": ""}, False),
+            ({"repository": "ltn-it/modulix-validation"}, False),
+            ({"event_name": "pull_request"}, False),
+            ({"event_name": "workflow_dispatch"}, False),
+            ({"ref": "refs/heads/develop"}, False),
+            ({"run_attempt": "2"}, False),
+            ({"event.before": followup, "run_attempt": "2"}, False),
+            ({"actor": "renovate[bot]"}, False),
+            ({"actor_id": "247824904"}, False),
+            ({"triggering_actor": "litdeg"}, False),
+        ]
+        executable = shutil.which("bash")
+        assert executable
+        for case in ("failure", "broker-cancel", "expiry-controller-loss"):
+            guard = jobs["g06-operating-" + case]["if"]
+            windows = re.findall(r"github\.event\.before == '([0-9a-f]{40})'", guard)
+            self.assertEqual([original, followup], windows)
+            for changes, wanted in examples:
+                with self.subTest(case=case, changes=changes):
+                    values = baseline | changes
+                    condition = re.sub(
+                        r"github\.([a-z_]+(?:\.[a-z_]+)?)",
+                        lambda match, values=values: "'" + values[match[1]] + "'",
+                        guard,
+                    )
+                    condition = " ".join(condition.split())
+                    self.assertRegex(condition, r"^[a-zA-Z0-9' /._=!&|()\[\]-]+$")
+                    result = subprocess.run(  # noqa: S603 -- fixed boolean guard, constrained above.
+                        [executable, "-c", "[[ " + condition + " ]]"],
+                        check=False,
+                        capture_output=True,
+                        timeout=5,
+                    )
+                    self.assertEqual(0 if wanted else 1, result.returncode, result.stderr.decode())
 
     def test_physical_proof_is_same_process_and_each_later_native_read_is_scoped(self) -> None:
         workflow = load_yaml(WORKFLOWS / "collection-ci.yml")
