@@ -13,7 +13,15 @@ builtin are available.
 
 ## Variables
 
-`defaults/main.yml`.
+`defaults/main.yml`. Set `forward_proxy_destination_domains_by_client` to an
+exact source-CIDR-to-domain-list mapping when clients require different
+destination permissions. Its keys must equal `forward_proxy_allowed_clients`;
+each nonempty domain list must be drawn from
+`forward_proxy_allowed_destination_domains`. A partial, duplicate or expanded
+policy fails before managed-state changes. The empty default retains the
+existing shared destination allowlist for other consumers. Squid identifies
+clients by their source address, so processes sharing a pod/network namespace
+also share its destination permissions.
 
 ## Dependencies
 
@@ -34,6 +42,15 @@ role. The authoritative collection constraint remains in `galaxy.yml`.
     forward_proxy_allowed_destination_domains:
       - .ubuntu.com
       - registry.example.com
+    forward_proxy_allowed_clients:
+      - 127.0.0.1/32
+      - 10.89.10.3/32
+    forward_proxy_destination_domains_by_client:
+      127.0.0.1/32:
+        - .ubuntu.com
+        - registry.example.com
+      10.89.10.3/32:
+        - registry.example.com
   roles:
     - role: lit.supplementary.forward_proxy
 ```

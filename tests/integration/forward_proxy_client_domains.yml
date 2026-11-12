@@ -1,0 +1,85 @@
+---
+- name: Verify source-bound proxy input rejection before runtime work
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    forward_proxy_enabled: false
+    forward_proxy_allowed_clients:
+      - 127.0.0.1/32
+      - 10.89.10.3/32
+    forward_proxy_allowed_destination_domains:
+      - .ubuntu.com
+      - lightning-it.okta.com
+    valid_client_domains:
+      127.0.0.1/32:
+        - .ubuntu.com
+      10.89.10.3/32:
+        - lightning-it.okta.com
+  tasks:
+    - name: Admit the complete exact client policy
+      ansible.builtin.include_role:
+        name: lit.supplementary.forward_proxy
+        tasks_from: assert
+      vars:
+        forward_proxy_destination_domains_by_client: "{{ valid_client_domains }}"
+
+    - name: Refuse a missing client policy before runtime work
+      block:
+        - name: Attempt a partial source mapping
+          ansible.builtin.include_role:
+            name: lit.supplementary.forward_proxy
+            tasks_from: assert
+          vars:
+            forward_proxy_destination_domains_by_client:
+              127.0.0.1/32:
+                - .ubuntu.com
+        - name: Fail if the partial source mapping was admitted
+          ansible.builtin.fail:
+            msg: A missing proxy client policy was admitted.
+      rescue:
+        - name: Require the missing-client assertion as the failure reason
+          ansible.builtin.assert:
+            that:
+              - "'forward_proxy_destination_domains_by_client' in (ansible_failed_result | to_json)"
+
+    - name: Refuse a domain outside the declared inventory before runtime work
+      block:
+        - name: Attempt an expanded destination policy
+          ansible.builtin.include_role:
+            name: lit.supplementary.forward_proxy
+            tasks_from: assert
+          vars:
+            forward_proxy_destination_domains_by_client:
+              127.0.0.1/32:
+                - .ubuntu.com
+              10.89.10.3/32:
+                - unexpected.example.net
+        - name: Fail if the expanded domain policy was admitted
+          ansible.builtin.fail:
+            msg: An undeclared proxy destination was admitted.
+      rescue:
+        - name: Require the expanded-domain assertion as the failure reason
+          ansible.builtin.assert:
+            that:
+              - "'item.value | difference' in (ansible_failed_result | to_json)"
+
+    - name: Refuse an empty client domain policy before runtime work
+      block:
+        - name: Attempt an empty destination policy
+          ansible.builtin.include_role:
+            name: lit.supplementary.forward_proxy
+            tasks_from: assert
+          vars:
+            forward_proxy_destination_domains_by_client:
+              127.0.0.1/32:
+                - .ubuntu.com
+              10.89.10.3/32: []
+        - name: Fail if the empty domain policy was admitted
+          ansible.builtin.fail:
+            msg: An empty proxy destination policy was admitted.
+      rescue:
+        - name: Require the empty-domain assertion as the failure reason
+          ansible.builtin.assert:
+            that:
+              - "'item.value | length > 0' in (ansible_failed_result | to_json)"

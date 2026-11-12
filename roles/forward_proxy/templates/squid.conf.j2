@@ -3,17 +3,30 @@
 http_port {{ address }}:{{ forward_proxy_port }}
 {% endfor %}
 
-acl lit_clients src {{ forward_proxy_allowed_clients | join(' ') }}
 acl lit_safe_ports port {{ forward_proxy_allowed_destination_ports | join(' ') }}
 acl lit_http_ports port 80
 acl lit_ssl_ports port 443
 acl lit_connect method CONNECT
+{% if forward_proxy_destination_domains_by_client | length > 0 %}
+{% for client, domains in forward_proxy_destination_domains_by_client | dictsort %}
+acl lit_client_{{ loop.index0 }} src {{ client }}
+acl lit_domains_{{ loop.index0 }} dstdomain -n {{ domains | join(' ') }}
+{% endfor %}
+{% else %}
+acl lit_clients src {{ forward_proxy_allowed_clients | join(' ') }}
 acl lit_allowed_domains dstdomain -n {{ forward_proxy_allowed_destination_domains | join(' ') }}
+{% endif %}
 
 http_access deny !lit_safe_ports
 http_access deny lit_connect !lit_ssl_ports
 http_access deny !lit_connect !lit_http_ports
+{% if forward_proxy_destination_domains_by_client | length > 0 %}
+{% for client, domains in forward_proxy_destination_domains_by_client | dictsort %}
+http_access allow lit_client_{{ loop.index0 }} lit_domains_{{ loop.index0 }}
+{% endfor %}
+{% else %}
 http_access allow lit_clients lit_allowed_domains
+{% endif %}
 http_access deny all
 
 cache deny all
