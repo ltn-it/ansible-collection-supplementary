@@ -812,7 +812,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             self.assertEqual(
                 "ltn-it/modulix-validation/.github/workflows/"
                 "collection-quality-profile-isolated.yml@"
-                "1d88e96e9dd6fb5ccdb052b3e76685e538bf5c66",
+                "c6d9445151c2e3e3312949f27eb624964a7b644d",
                 delegated["uses"],
             )
             self.assertNotIn("environment-name", delegated["with"])
@@ -876,6 +876,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         jobs = load_yaml(WORKFLOWS / "collection-ci.yml")["jobs"]
         original = "90e7216b5d085ca4ac6238e44dcdbaa51e847d5f"
         followup = "14e3abd5d1fa0cfad14d52ec83483b761de207f0"
+        preauth_followup = "f27c1d4edff75377f285275cec9bfec6bc3081f6"
         baseline = {
             "repository": "ltn-it/ansible-collection-supplementary",
             "event_name": "push",
@@ -893,6 +894,18 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                 {"event.before": followup, "actor": "litdeg", "actor_id": "247824904", "triggering_actor": "litdeg"},
                 True,
             ),
+            ({"event.before": preauth_followup}, True),
+            (
+                {
+                    "event.before": preauth_followup,
+                    "actor": "litdeg",
+                    "actor_id": "247824904",
+                    "triggering_actor": "litdeg",
+                },
+                True,
+            ),
+            ({"event.before": preauth_followup, "run_attempt": "2"}, False),
+            ({"event.before": preauth_followup, "event_name": "workflow_dispatch"}, False),
             ({"event.before": "f" * 40}, False),
             ({"event.before": ""}, False),
             ({"repository": "ltn-it/modulix-validation"}, False),
@@ -910,7 +923,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         for case in ("failure", "broker-cancel", "expiry-controller-loss"):
             guard = jobs["g06-operating-" + case]["if"]
             windows = re.findall(r"github\.event\.before == '([0-9a-f]{40})'", guard)
-            self.assertEqual([original, followup], windows)
+            self.assertEqual([original, followup, preauth_followup], windows)
             for changes, wanted in examples:
                 with self.subTest(case=case, changes=changes):
                     values = baseline | changes
