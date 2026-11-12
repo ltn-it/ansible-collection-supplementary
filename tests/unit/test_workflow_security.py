@@ -698,7 +698,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             self.assertRegex(
                 delegated["uses"],
                 r"^ltn-it/modulix-validation/\.github/workflows/"
-                r"collection-quality-profile\.yml@[0-9a-f]{40}$",
+                r"collection-quality-profile-isolated\.yml@[0-9a-f]{40}$",
             )
             self.assertEqual(profile, delegated["with"]["profile"])
             self.assertIn("quality-matrix.outputs", delegated["with"]["matrix-json"])
@@ -811,20 +811,101 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             delegated = jobs[job_name]
             self.assertEqual(
                 "ltn-it/modulix-validation/.github/workflows/"
-                "collection-quality-profile.yml@"
-                "154c99eb0d907b01edc10e9b39c94ef4912fd9dd",
+                "collection-quality-profile-isolated.yml@"
+                "f6966a9b537e97b2ef5cea68286d60fd7d1a0696",
                 delegated["uses"],
             )
+            self.assertNotIn("environment-name", delegated["with"])
             self.assertEqual(
-                "ansible-collection-runtime-protected",
-                delegated["with"]["environment-name"],
+                {"contents": "read", "actions": "read", "checks": "read", "id-token": "write"},
+                delegated["permissions"],
             )
+            self.assertEqual(
+                "collection-candidate-${{ github.event.pull_request.head.sha || github.sha }}",
+                delegated["with"]["candidate-artifact"],
+            )
+            self.assertEqual("${{ github.event.pull_request.head.sha || github.sha }}", delegated["with"]["source-sha"])
             self.assertNotIn("secrets", delegated)
         self.assertEqual("Collection / Release Evidence", jobs["evidence"]["name"])
         self.assertEqual(
             ["lint-sanity", "build-install", "role-coverage", "quality-matrix", "tiny"],
             jobs["fast"]["needs"],
         )
+
+    def test_operating_cases_are_one_transition_serial_and_separate_from_business_profiles(self) -> None:
+        jobs = load_yaml(WORKFLOWS / "collection-ci.yml")["jobs"]
+        previous = None
+        callee = jobs["heavy-cells"]["uses"]
+        for case in ("failure", "broker-cancel", "expiry-controller-loss"):
+            name = "g06-operating-" + case
+            job = jobs[name]
+            guard = job["if"]
+            for required in (
+                "github.event_name == 'push'",
+                "github.ref == 'refs/heads/main'",
+                "github.run_attempt == 1",
+                "github.event.before == '90e7216b5d085ca4ac6238e44dcdbaa51e847d5f'",
+                "github.actor_id == '76040632'",
+                "github.actor_id == '247824904'",
+                "github.triggering_actor == github.actor",
+            ):
+                self.assertIn(required, guard)
+            self.assertEqual(job["uses"], callee)
+            self.assertEqual(job["needs"], ["build-install", "heavy", "acceptance"] + ([previous] if previous else []))
+            self.assertEqual(
+                job["permissions"], {"contents": "read", "actions": "read", "checks": "read", "id-token": "write"}
+            )
+            self.assertEqual(
+                job["with"],
+                {
+                    "profile": "operating",
+                    "operating-case": case,
+                    "matrix-json": '{"include":[]}',
+                    "candidate-artifact": "collection-candidate-${{ github.sha }}",
+                    "source-sha": "${{ github.sha }}",
+                },
+            )
+            self.assertNotIn("secrets", job)
+            self.assertNotIn("continue-on-error", job)
+            previous = name
+        self.assertEqual(
+            load_yaml(WORKFLOWS / "collection-ci.yml")["env"]["G06_VALIDATION_CONTROLLER_SHA"], callee.rsplit("@", 1)[1]
+        )
+
+    def test_physical_proof_is_same_process_and_each_later_native_read_is_scoped(self) -> None:
+        workflow = load_yaml(WORKFLOWS / "collection-ci.yml")
+        jobs = workflow["jobs"]
+        aggregate = next(step for step in jobs["runtime-evidence"]["steps"] if step.get("id") == "assemble")
+        self.assertIn("python -m scripts.g06_final_quality", aggregate["run"])
+        self.assertIn("--aggregate-root artifacts/evidence", aggregate["run"])
+        self.assertNotIn("python scripts/quality_evidence.py", aggregate["run"])
+        self.assertEqual(aggregate["env"]["GITHUB_TOKEN"], "${{ github.token }}")
+        self.assertEqual(jobs["release-admission"]["timeout-minutes"], 10)
+        for name, seconds in (
+            ("runtime-evidence", 3510),
+            ("release-admission", 510),
+            ("release-security", 3510),
+            ("release-validation", 1110),
+        ):
+            job = jobs[name]
+            clock = job["steps"][0]
+            self.assertIn("time.monotonic() + " + str(seconds), clock["run"])
+            self.assertIn("G06_FINAL_PHASE_DEADLINE=", clock["run"])
+            self.assertEqual(job["permissions"]["actions"], "read")
+            self.assertEqual(job["permissions"]["checks"], "read")
+            for step in job["steps"]:
+                if "python scripts/quality_evidence.py validate" in step.get("run", ""):
+                    self.assertEqual(step["env"]["GITHUB_TOKEN"], "${{ github.token }}")
+        publish = load_yaml(WORKFLOWS / "collection-publish.yml")["jobs"]["publish"]
+        step = next(
+            step
+            for step in publish["steps"]
+            if step.get("name") == "Validate candidate, MANIFEST, evidence, and repository policy"
+        )
+        self.assertEqual(step["env"]["CI_RUN_ID"], "${{ needs.release-validation.outputs.ci-run-id }}")
+        self.assertEqual(step["env"]["G06_VALIDATION_CONTROLLER_SHA"], workflow["env"]["G06_VALIDATION_CONTROLLER_SHA"])
+        self.assertEqual(step["env"]["GITHUB_TOKEN"], "${{ github.token }}")
+        self.assertEqual(publish["permissions"]["checks"], "read")
 
     def test_protected_main_evidence_adapter_is_exact_and_fail_closed(self) -> None:
         jobs = load_yaml(WORKFLOWS / "collection-ci.yml")["jobs"]
