@@ -350,6 +350,19 @@ Example playbook:
   and the remaining incomplete implementations are experimental until their
   mandatory profiles are real and green.
 
+## G06 operating continuation
+
+The three G06 operating cases remain separate from business quality results.
+Their caller permits the original Main transition from `90e7216b5d08` and one
+functional follow-up from `14e3abd5d1fa`, on attempt one with the existing eligible
+user and matching triggering actor. The failed original run remains failed.
+The Root service must independently bind the exact follow-up Main commit and
+native run to the original failure and verified absence of consumed intake.
+This caller condition grants no lease or retry authority. Both ordinary profiles
+must pass before the serial failure, broker cancellation and expiry cases run.
+Actual four-hour retention, cleanup and local root-mail delivery remain required;
+a skipped case or successful local test does not satisfy operating acceptance.
+
 ## Local checks
 
 This repository uses **pre-commit** and a shared devtools container
