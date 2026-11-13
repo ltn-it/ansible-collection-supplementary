@@ -1,0 +1,6 @@
+---
+bugfixes:
+  - >-
+    G06 operating windows - admit the exact functional successor of the failed
+    f138 Main run while preserving every earlier first-parent window, original
+    attempt requirement, and matching human actor identity.
