@@ -4,3 +4,6 @@ bugfixes:
     G06 operating windows - admit the exact functional successor of the failed
     f138 Main run while preserving every earlier first-parent window, original
     attempt requirement, and matching human actor identity.
+  - >-
+    G06 operating admission - consume the immutable Validation controller whose
+    admission action recognizes the same fixed predecessor windows.
