@@ -353,11 +353,17 @@ Example playbook:
 ## G06 operating continuation
 
 The three G06 operating cases remain separate from business quality results.
-Their caller permits the original Main transition from `90e7216b5d08` and one
-functional follow-up from `14e3abd5d1fa`, on attempt one with the existing eligible
-user and matching triggering actor. The failed original run remains failed.
+Their caller retains the original Main transition from `90e7216b5d08`, the
+functional follow-up from `14e3abd5d1fa`, and the exact client-protocol correction
+from `f27c1d4edff7`, on attempt one with the existing eligible user and matching
+triggering actor. Both failed original runs remain failed.
 The Root service must independently bind the exact follow-up Main commit and
-native run to the original failure and verified absence of consumed intake.
+native run to both recorded failures and their exact Root no-work evidence.
+The pinned validator requires the installed client capability `initial-auth-idle-v1`
+before work: a 60-second initial authentication idle allowance and a separate
+5-second frame bound. This local interface check grants no native admission and
+does not establish collector health; the accepted package and measured complete
+authentication budget remain mandatory.
 This caller condition grants no lease or retry authority. Both ordinary profiles
 must pass before the serial failure, broker cancellation and expiry cases run.
 Actual four-hour retention, cleanup and local root-mail delivery remain required;
