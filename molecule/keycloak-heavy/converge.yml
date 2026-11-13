@@ -218,7 +218,7 @@
     keycloak_heavy_cac_operator_password: "{{ lookup('env', 'KEYCLOAK_TEST_CAC_OPERATOR_PASSWORD') }}"
     keycloak_heavy_cac_denied_password: "{{ lookup('env', 'KEYCLOAK_TEST_CAC_DENIED_PASSWORD') }}"
     keycloak_deploy_image: >-
-      quay.io/keycloak/keycloak:26.7.1@sha256:f1f1f01e472c8a78df40d8f2a49a925274eda4d3d80d5f6edbb5c880ee3c01c6
+      quay.io/keycloak/keycloak:26.8.2@sha256:c68e286cacd87b942ac1939a0a1481461109d6acd3a57dc496969a319a76bbf0
     keycloak_deploy_start_command: start
     keycloak_deploy_manage_postgres: true
     keycloak_deploy_manage_systemd: true
