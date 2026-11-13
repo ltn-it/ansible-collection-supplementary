@@ -877,6 +877,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         original = "90e7216b5d085ca4ac6238e44dcdbaa51e847d5f"
         followup = "14e3abd5d1fa0cfad14d52ec83483b761de207f0"
         preauth_followup = "f27c1d4edff75377f285275cec9bfec6bc3081f6"
+        diagnosed_followup = "3d84e26d90cc778fb8c4f462ce481584da57fb5a"
         baseline = {
             "repository": "ltn-it/ansible-collection-supplementary",
             "event_name": "push",
@@ -904,6 +905,20 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                 },
                 True,
             ),
+            ({"event.before": diagnosed_followup}, True),
+            (
+                {
+                    "event.before": diagnosed_followup,
+                    "actor": "litdeg",
+                    "actor_id": "247824904",
+                    "triggering_actor": "litdeg",
+                },
+                True,
+            ),
+            ({"event.before": diagnosed_followup, "run_attempt": "2"}, False),
+            ({"event.before": diagnosed_followup, "event_name": "workflow_dispatch"}, False),
+            ({"event.before": diagnosed_followup, "actor_id": "247824904"}, False),
+            ({"event.before": diagnosed_followup, "triggering_actor": "litdeg"}, False),
             ({"event.before": preauth_followup, "run_attempt": "2"}, False),
             ({"event.before": preauth_followup, "event_name": "workflow_dispatch"}, False),
             ({"event.before": "f" * 40}, False),
@@ -923,7 +938,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         for case in ("failure", "broker-cancel", "expiry-controller-loss"):
             guard = jobs["g06-operating-" + case]["if"]
             windows = re.findall(r"github\.event\.before == '([0-9a-f]{40})'", guard)
-            self.assertEqual([original, followup, preauth_followup], windows)
+            self.assertEqual([original, followup, preauth_followup, diagnosed_followup], windows)
             for changes, wanted in examples:
                 with self.subTest(case=case, changes=changes):
                     values = baseline | changes

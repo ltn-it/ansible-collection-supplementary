@@ -1,0 +1,5 @@
+---
+bugfixes:
+  - >-
+    G06 operating cases - admit the exact diagnosed predecessor for the next protected Main delivery
+    while retaining all existing event, actor, attempt, dependency, and Root continuity requirements.
