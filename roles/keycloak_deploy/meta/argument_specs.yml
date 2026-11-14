@@ -333,3 +333,9 @@ argument_specs:
       keycloak_deploy_rootless_publish_management:
         description: Publish management only on host loopback for local readiness checks.
         type: bool
+      keycloak_deploy_log_path:
+        description: Optional prepared native Keycloak log file for experimental rootless user scope.
+        type: str
+      keycloak_deploy_postgres_log_path:
+        description: Optional prepared native PostgreSQL log file for experimental rootless user scope.
+        type: str
