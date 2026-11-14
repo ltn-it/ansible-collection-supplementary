@@ -1,6 +1,7 @@
 """Run actual Ansible command tasks against isolated fake database executables."""
 
 import os
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -14,6 +15,7 @@ ROLE = Path(__file__).resolve().parents[2] / "roles/postgres_backup_restore"
 
 class OperationalOutputTests(unittest.TestCase):
     def execute(self, action, mode, fmt, rc=0):
+        fixture_credential = secrets.token_hex(16)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             binary = root / "bin"
@@ -23,8 +25,8 @@ class OperationalOutputTests(unittest.TestCase):
             source = root / "source.dump"
             source.write_text("fixture-source")
             backup = root / "new.dump"
-            fixture = """#!/bin/sh
-[ "$PGPASSWORD" = "fixture-password" ] || exit 99
+            fixture = f"""#!/bin/sh
+[ "$PGPASSWORD" = "{fixture_credential}" ] || exit 99
 case "$0" in
   *psql) case " $* " in *" --set ON_ERROR_STOP=1 "*) ;; *) exit 96 ;; esac ;;
 esac
@@ -57,7 +59,7 @@ exec "$@"
                 postgres_backup_restore_db_user="fixture",
                 postgres_backup_restore_db_host="/fixture-socket",
                 postgres_backup_restore_db_port=5432,
-                postgres_backup_restore_db_password="fixture-password",  # noqa: S106 - synthetic test credential
+                postgres_backup_restore_db_password=fixture_credential,
                 postgres_backup_restore_container_name="fixture-container",
                 postgres_backup_restore_operations_log_file=str(log),
                 postgres_backup_restore_file=str(backup),
@@ -91,7 +93,7 @@ exec "$@"
                 [executable, "-i", "localhost,", str(play)], capture_output=True, text=True, env=env, timeout=40
             )
             self.assertEqual(result.returncode, 0 if rc == 0 else 2, result.stdout + result.stderr)
-            self.assertNotIn("fixture-password", result.stdout + result.stderr)
+            self.assertNotIn(fixture_credential, result.stdout + result.stderr)
             self.assertNotIn("private-diagnostic-fixture", result.stdout + result.stderr)
             contents = log.read_text()
             self.assertIn("START " + action, contents)
