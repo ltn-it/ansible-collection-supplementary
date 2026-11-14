@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import copy
 import hashlib
 import importlib.util
@@ -46,17 +47,55 @@ class NativeControlPolicyContractTests(unittest.TestCase):
             self.assertNotIn(unknown, lineage["accepted_predecessors"])
             api = Mock()
             api.file.return_value = json.dumps(protected).encode()
-            config = core.policy(api, REPOSITORY, "a" * 40, PROOF.CONTROL_SOURCE)
+            config = PROOF.control_policy(api, core, REPOSITORY, "1103407173", "a" * 40)
             api.file.assert_called_once_with(REPOSITORY, ".lit/workflow-control.json", "a" * 40)
+            self.assertEqual(2, config["version"])
             self.assertIn(producer, config["accepted_sources"])
             self.assertNotIn(unknown, config["accepted_sources"])
             self.assertEqual({producer, *lineage["accepted_predecessors"]}, set(config["accepted_sources"]))
+            legacy = protected | {"version": 1}
+            api.file.return_value = json.dumps(legacy).encode()
             old_reader = core.policy(api, REPOSITORY, "a" * 40, "f263bac1a19c7b7a0f727e744c35360666925820")
             self.assertNotIn(producer, old_reader["accepted_sources"])
+            self.assertEqual(1, PROOF.control_policy(api, core, REPOSITORY, "1103407173", "a" * 40)["version"])
             protected["accepted_sources"] = [unknown]
             api.file.return_value = json.dumps(protected).encode()
             with self.assertRaisesRegex(core.ControlError, "consumer-cannot-admit-central-source"):
-                core.policy(api, REPOSITORY, "a" * 40, PROOF.CONTROL_SOURCE)
+                PROOF.control_policy(api, core, REPOSITORY, "1103407173", "a" * 40)
+            protected["accepted_sources"] = []
+            protected["supplementary_funding_contract"] = {
+                "version": 2,
+                "candidate_scope": "repository-head",
+                "legacy_claims": "consumed",
+                "unknown_outcomes": "consumed_uncertain",
+            }
+            api.file.return_value = json.dumps(protected).encode()
+            expected = PROOF.archive.binding(REPOSITORY, "1103407173", "b" * 40, "a" * 40, "c" * 40, producer)
+            recorder = PROOF.archive.Record(api, expected)
+            config = PROOF.control_policy(recorder, core, REPOSITORY, "1103407173", "a" * 40)
+            self.assertEqual(protected["supplementary_funding_contract"], config["supplementary_funding_contract"])
+            self.assertEqual(2, config["version"])
+            # Archive the actual native bytes, never the private parser projection.
+            self.assertEqual(1, len(recorder.reads))
+            self.assertEqual(api.file.return_value, base64.b64decode(recorder.reads[0]["value"]))
+            replay_api = Mock()
+            replay_api.file.return_value = base64.b64decode(recorder.reads[0]["value"])
+            self.assertEqual(config, PROOF.control_policy(replay_api, core, REPOSITORY, "1103407173", "a" * 40))
+            for field, value in (("unknown_outcomes", "unused"), ("version", True), ("extra", "authority")):
+                changed = copy.deepcopy(protected)
+                changed["supplementary_funding_contract"][field] = value
+                api.file.return_value = json.dumps(changed).encode()
+                with self.subTest(contract_field=field), self.assertRaisesRegex(ValueError, "funding-contract-shape"):
+                    PROOF.control_policy(api, core, REPOSITORY, "1103407173", "a" * 40)
+            for selector in ("release-app-security/v1", "unknown", None, True):
+                api.file.return_value = json.dumps(protected | {"security_profile": selector}).encode()
+                with self.subTest(selector=selector), self.assertRaisesRegex(ValueError, "security-profile"):
+                    PROOF.control_policy(api, core, REPOSITORY, "1103407173", "a" * 40)
+            api.file.return_value = json.dumps(protected).encode()
+            with self.assertRaisesRegex(ValueError, "repository-id"):
+                PROOF.control_policy(api, core, REPOSITORY, "1", "a" * 40)
+            with self.assertRaisesRegex(ValueError, "policy-identity"):
+                PROOF.control_policy(api, core, "lightning-it/ansible-collection-cloud", "1103407173", "a" * 40)
             # The existing publisher pins the exact same defining source.
             workflow = yaml.safe_load((ROOT / ".github/workflows/collection-publish.yml").read_text())
             checkout = next(
@@ -190,6 +229,7 @@ class NormalReleaseProofTests(unittest.TestCase):
         self.api = Mock()
         self.api.pages.side_effect = self.pages
         self.api.call.side_effect = self.call
+        self.api.file.return_value = (ROOT / ".lit/workflow-control.json").read_bytes()
         self.core = Mock()
         self.core.policy.return_value = {"accepted_sources": [PROOF.CONTROL_SOURCE]}
         self.core.check_native_control.return_value = self.ingress
@@ -285,9 +325,15 @@ class NormalReleaseProofTests(unittest.TestCase):
         self.assertEqual(result["preparation_pr"], 1)
         self.assertEqual(result["prepared_head"], self.prepared)
         self.assertEqual(result["next_version"], "1.0.1")
-        self.core.policy.assert_called_once_with(self.api, REPOSITORY, self.main_base, PROOF.CONTROL_SOURCE)
+        self.core.policy.assert_called_once()
+        parser_api, repository, base, source = self.core.policy.call_args.args
+        self.assertEqual((repository, base, source), (REPOSITORY, self.main_base, PROOF.CONTROL_SOURCE))
+        self.assertEqual(1, json.loads(parser_api.file(repository, ".lit/workflow-control.json", base))["version"])
         self.core.check_native_control.assert_called_once_with(
-            self.api, REPOSITORY, self.prep, self.core.policy.return_value
+            self.api,
+            REPOSITORY,
+            self.prep,
+            self.core.policy.return_value | {"version": 2, "repository": REPOSITORY},
         )
 
     def test_pre_promotion_rejects_other_native_route(self):
@@ -1130,7 +1176,8 @@ class NormalReleaseProofTests(unittest.TestCase):
         self.assertIn("outputs.ready == 'true'", prepare["prepare"]["if"])
         script = "\n".join(step.get("run", "") for step in prepare["prepare"]["steps"])
         self.assertIn('"$workflow_source/scripts/normal_release_proof.py" preparation', script)
-        self.assertIn('if [ "$REVIEW_ROUTE" = legacy ]; then\n  gh workflow', script)
+        self.assertIn('if [ "$REVIEW_ROUTE" = legacy ]; then\n  echo', script)
+        self.assertNotIn("gh workflow run release-bot-exact-head-review.yml", script)
         publish = yaml.safe_load((ROOT / ".github/workflows/collection-publish.yml").read_text())["jobs"]["publish"]
         steps = {step["name"]: step for step in publish["steps"]}
         proof = steps["Prove normal preparation ingress and exact approved promotion"]

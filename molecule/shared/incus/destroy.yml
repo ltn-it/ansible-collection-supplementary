@@ -162,6 +162,21 @@
       loop_control:
         label: "{{ item.name | default('invalid') }}"
 
+    - name: Qualify the explicit Incus transport before lifecycle access
+      ansible.builtin.include_tasks: >-
+        {{
+          lookup(
+            'ansible.builtin.first_found',
+            {
+              'files': [
+                playbook_dir ~ '/transport.yml',
+                playbook_dir ~ '/../shared/incus/transport.yml',
+                playbook_dir ~ '/../incus/transport.yml'
+              ]
+            }
+          )
+        }}
+
     - name: Generate a unique evidence event timestamp
       ansible.builtin.command:
         argv:
@@ -193,7 +208,9 @@
           - incus
           - list
           - --format
-          - json
+          - csv
+          - -c
+          - n
       register: molecule_incus_all_instance_names
       changed_when: false
 
@@ -316,6 +333,14 @@
               is match('^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$')
         fail_msg: Refusing malformed runtime firewall ownership metadata.
 
+    - name: Refuse remote cleanup that requires an ungranted host firewall operation
+      ansible.builtin.assert:
+        that:
+          - molecule_incus_recorded_firewall_controller in ['incus', 'unknown']
+          - molecule_incus_recorded_firewalld_zone == 'none'
+        fail_msg: TLS cleanup cannot change host firewalld; retain the resource for the accepted collector.
+      when: molecule_incus_is_remote | bool
+
     - name: Detect an active host firewalld service during destroy
       ansible.builtin.command:
         argv:
@@ -325,13 +350,15 @@
       register: molecule_incus_destroy_firewalld_service
       changed_when: false
       failed_when: false
+      when: not molecule_incus_is_remote | bool
 
     - name: Resolve firewalld activity during destroy
       ansible.builtin.set_fact:
         molecule_incus_destroy_firewalld_active: >-
           {{
-            molecule_incus_destroy_firewalld_service.rc == 0
-            and molecule_incus_destroy_firewalld_service.stdout | trim == 'active'
+            not molecule_incus_is_remote
+            and molecule_incus_destroy_firewalld_service.rc | default(1) == 0
+            and molecule_incus_destroy_firewalld_service.stdout | default('') | trim == 'active'
           }}
 
     - name: Create private Incus lifecycle evidence directory
@@ -522,6 +549,7 @@
           - delete
           - "{{ molecule_incus_network_effective }}"
       when:
+        - not molecule_incus_is_remote | bool
         - molecule_incus_network_owner_at_delete.rc == 0
         - molecule_incus_network_owner_at_delete.stdout | trim == molecule_incus_owner_effective
       register: molecule_incus_network_deletion
@@ -726,9 +754,12 @@
                   == molecule_incus_owner_effective
               ) | bool | to_json
             }},
+            "network_cleanup_authority": {{ ('root' if molecule_incus_is_remote else 'local-lifecycle') | to_json }},
+            "network_cleanup_deferred": {{ molecule_incus_is_remote | bool | to_json }},
             "network_delete_attempted": {{
               (
-                molecule_incus_network_owner_at_delete.rc == 0
+                not molecule_incus_is_remote
+                and molecule_incus_network_owner_at_delete.rc == 0
                 and molecule_incus_network_owner_at_delete.stdout | trim
                   == molecule_incus_owner_effective
               ) | bool | to_json
@@ -762,9 +793,13 @@
       ansible.builtin.assert:
         that:
           - molecule_incus_remaining_exact_owned_instances | length == 0
-          - molecule_incus_remaining_exact_owned_networks | length == 0
           - >-
-            molecule_incus_remaining_network_owner.rc != 0
+            (molecule_incus_remaining_exact_owned_networks
+              | difference([molecule_incus_network_effective]) | length == 0)
+            if molecule_incus_is_remote else (molecule_incus_remaining_exact_owned_networks | length == 0)
+          - >-
+            molecule_incus_is_remote
+            or molecule_incus_remaining_network_owner.rc != 0
             or molecule_incus_remaining_network_owner.stdout | trim
               != molecule_incus_owner_effective
         fail_msg: >-

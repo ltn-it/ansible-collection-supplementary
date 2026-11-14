@@ -21,6 +21,7 @@ from pathlib import Path
 
 import normal_release_archive as archive
 import security_main_promotion as git_contract
+import security_premerge_proof as policy_contract
 
 CONTROL_SOURCE = "bb1a5df9f54c5f98547048297e7e367cc382543e"
 APP = ("lightning-it-release-automation[bot]", 307565056, "Bot")
@@ -142,6 +143,36 @@ def load_control(directory):
     return importlib.import_module("workflow_control")
 
 
+def control_policy(api, core, repository, repository_id, base):
+    """Adapt only the installed schema to bb1's unchanged lineage validator.
+
+    Archive readers still receive the actual native bytes once. The projection
+    is private parser input, never a native policy observation or proof. bb1
+    cannot authenticate producer-only Security ingress, so that selector remains
+    closed here instead of being silently ignored by its older policy reader.
+    """
+    require(repository_id == policy_contract.C.PRODUCER_REPOSITORY_ID, "protected-policy-repository-id")
+    raw = api.file(repository, ".lit/workflow-control.json", base)
+    installed = git_contract.CONTRACT.load_json_bytes(raw, "protected workflow-control policy")
+    require(policy_contract.policy_schema(installed, repository) == "legacy", "normal-policy-security-profile")
+    projected = installed | {"version": 1, "repository": repository}
+
+    class PolicyRead:
+        """Only the exact already-observed file may reach this parser input."""
+
+        def file(self, repo, path, revision):
+            require(
+                (repo, path, revision) == (repository, ".lit/workflow-control.json", base),
+                "protected-policy-read-scope",
+            )
+            return json.dumps(projected).encode()
+
+    config = core.policy(PolicyRead(), repository, base, CONTROL_SOURCE)
+    # Retain the real schema and repository label in the policy result; only
+    # central source lineage is expanded by the immutable authority above.
+    return config | {"version": installed["version"], "repository": installed["repository"]}
+
+
 def promotion_control(api, core, repository, pull, config):
     runs = api.pages(f"repos/{repository}/actions/runs?head_sha={pull['head']['sha']}", "workflow_runs")
     cache = {}
@@ -245,7 +276,7 @@ def promotion_ready(root, api, core, repository, repository_id, base, head):
                 "normal-promotion-security-marker",
             )
     pull = merged_pull(api, repository, head, "develop", f"release/v{receipt['next_version']}", content_base, prepared)
-    config = core.policy(api, repository, base, CONTROL_SOURCE)
+    config = control_policy(api, core, repository, repository_id, base)
     ingress = core.check_native_control(api, repository, pull, config)
     require(ingress.get("route") == "codex", "genuine-app-ingress-review-required")
     require(
@@ -332,7 +363,7 @@ def _publish(root, api, core, repository, repository_id, release, base, head, cu
     )
     prep = merged_pull(api, repository, head, "develop", f"release/v{receipt['next_version']}", content_base, prepared)
     promotion = merged_pull(api, repository, release, "main", "develop", base, head)
-    config = core.policy(api, repository, base, CONTROL_SOURCE)
+    config = control_policy(api, core, repository, repository_id, base)
     ingress = core.check_native_control(api, repository, prep, config)
     require(ingress["route"] == "codex", "genuine-app-ingress-review-required")
     proof, excluded = promotion_control(api, core, repository, promotion, config)

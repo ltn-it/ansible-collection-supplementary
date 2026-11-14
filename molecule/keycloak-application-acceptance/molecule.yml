@@ -26,6 +26,8 @@ provisioner:
     host_vars:
       "${KEYCLOAK_TEST_INSTANCE:-lit-supplementary-local-1-kc-accept-ubuntu-24.04}":
         ansible_connection: community.general.incus
+        ansible_incus_remote: "${MOLECULE_INCUS_REMOTE:-local}"
+        ansible_incus_project: "${MOLECULE_INCUS_PROJECT:-default}"
         ansible_python_interpreter: /usr/bin/python3
   playbooks:
     create: create.yml

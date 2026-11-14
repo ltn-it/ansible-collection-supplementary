@@ -1,0 +1,5 @@
+---
+bugfixes:
+  - >-
+    Bind the G06 functional client-protocol follow-up to its exact Main parent
+    while preserving both failed original runs and all operating acceptance requirements.

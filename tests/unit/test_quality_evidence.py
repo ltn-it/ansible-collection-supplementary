@@ -470,6 +470,55 @@ class QualityEvidenceTests(unittest.TestCase):
         with patch.dict(os.environ, self._environment(), clear=False):
             self.assertEqual(0, evidence.validate(self.evidence_root))
 
+    def test_preliminary_evidence_preserves_results_without_final_quality_pass(self) -> None:
+        for failed in (False, True):
+            with self.subTest(failed=failed):
+                registry_path = self._registry()
+                self._junit(status="failure" if failed else "passed")
+                with patch.dict(os.environ, self._environment(), clear=False):
+                    result = evidence.assemble(
+                        self.evidence_root,
+                        input_roots=[self.artifacts],
+                        registry_path=registry_path,
+                        repository_root=self.repository,
+                        preliminary=True,
+                    )
+                self.assertEqual(result, 1 if failed else 0)
+                manifest = json.loads((self.evidence_root / "manifest.json").read_text())
+                self.assertEqual(manifest["root_finalization"], "pending")
+                self.assertEqual(manifest["execution_success"], not failed)
+                self.assertIs(manifest["candidate_execution_passed"], False)
+                self.assertIs(manifest["release_eligible"], False)
+                self.assertEqual(manifest["results"][0]["status"], "failed" if failed else "passed")
+                with patch.dict(os.environ, self._environment(), clear=False):
+                    self.assertEqual(evidence.validate(self.evidence_root), 1)
+
+    def test_preliminary_cannot_be_combined_with_release_acceptance(self) -> None:
+        with self.assertRaisesRegex(evidence.EvidenceError, "preliminary.*release"):
+            evidence.assemble(self.evidence_root, preliminary=True, release_mode=True)
+
+    def test_only_preliminary_destroy_can_remain_pending(self) -> None:
+        registry = self._registry()
+        self._junit()
+        for pending in ("destroy", "cleanup", "heavy"):
+            statuses = {name: "success" for name in evidence.MANDATORY_PREREQUISITES}
+            statuses[pending] = "pending"
+            environment = {**self._environment(), "QUALITY_EVIDENCE_PREREQUISITES_JSON": json.dumps(statuses)}
+            with self.subTest(pending=pending), patch.dict(os.environ, environment, clear=False):
+                result = evidence.assemble(
+                    self.evidence_root,
+                    input_roots=[self.artifacts],
+                    registry_path=registry,
+                    repository_root=self.repository,
+                    preliminary=True,
+                )
+                self.assertEqual(result, 0 if pending == "destroy" else 1)
+                manifest = json.loads((self.evidence_root / "manifest.json").read_text())
+                self.assertEqual(manifest["prerequisites"][pending], "pending")
+                self.assertIs(manifest["release_eligible"], False)
+                self.assertIs(manifest["candidate_execution_passed"], False)
+                self.assertEqual(evidence.validate(self.evidence_root), 1)
+
     def test_shared_scenario_target_mismatch_fails_closed_in_evidence_matrix(self) -> None:
         registry = {
             "targets": {

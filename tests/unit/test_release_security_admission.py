@@ -107,7 +107,7 @@ class ReleaseSecurityAdmissionTests(unittest.TestCase):
     def test_environment_depends_on_complete_read_only_admission(self) -> None:
         admission = JOBS["release-admission"]
         self.assertNotIn("environment", admission)
-        self.assertEqual({"actions": "read", "contents": "read"}, admission["permissions"])
+        self.assertEqual({"actions": "read", "checks": "read", "contents": "read"}, admission["permissions"])
         self.assertEqual(set(ADMISSION.MANDATORY), set(admission["needs"]))
         text = json.dumps(admission)
         self.assertNotIn("secrets.", text)

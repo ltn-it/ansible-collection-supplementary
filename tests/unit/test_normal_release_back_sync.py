@@ -403,7 +403,7 @@ class AdoptedBackSyncSourceContractTests(unittest.TestCase):
         self.assertEqual("needs.security-classification.outputs.normal-two-stage == 'true'", checkout["if"])
         mint = next(s for s in steps if s.get("id") == "release-app")
         self.assertEqual(
-            {"permission-actions": "write", "permission-contents": "write", "permission-pull-requests": "write"},
+            {"permission-actions": "read", "permission-contents": "write", "permission-pull-requests": "write"},
             {k: v for k, v in mint["with"].items() if k.startswith("permission-")},
         )
 

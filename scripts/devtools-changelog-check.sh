@@ -253,13 +253,14 @@ bash scripts/wunder-devtools-ee.sh bash -lc '
     exit 0
   fi
 
-  non_user_visible_re="^(\\.github/|\\.releaserc|\\.pre-commit-config\\.yaml|\\.ansible-lint|"
-  non_user_visible_re+="\\.lit/main-ancestry\\.json$|"
+  non_user_visible_re="^(\\.github/|\\.lit/|\\.releaserc|\\.pre-commit-config\\.yaml|\\.ansible-lint|"
   non_user_visible_re+="\\.yamllint|renovate|README\\.md|docs/|molecule/|tests/|scripts/|"
   non_user_visible_re+="CHANGELOG\\.(md|rst)|changelogs/config\\.yaml|"
   non_user_visible_re+="changelogs/changelog\\.yaml|changelogs/release-preparation\\.json$|"
   non_user_visible_re+="changelogs/fragments/|"
   non_user_visible_re+="package(-lock)?\\.json|AGENTS\\.md|CONTRIBUTING\\.md|SECURITY\\.md)"
+  # .lit/ is reserved for repository governance metadata, alongside .github/.
+  # This classifies release notes only; JSON, schema and security gates still apply.
   user_visible=""
   if user_visible="$(grep -Ev "$non_user_visible_re" <<<"$changed")"; then
     :

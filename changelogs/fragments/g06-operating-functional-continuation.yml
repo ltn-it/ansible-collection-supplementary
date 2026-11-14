@@ -1,0 +1,4 @@
+---
+bugfixes:
+  - Permit the three G06 operating cases on one exact functional Main follow-up while preserving the failed original
+    run, attempt-one guards, Root continuity verification, serial dependencies, and retention requirements.

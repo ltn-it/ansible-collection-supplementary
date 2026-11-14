@@ -1,0 +1,108 @@
+---
+- name: Resolve the explicit Incus lifecycle transport
+  ansible.builtin.set_fact:
+    molecule_incus_transport_mode: >-
+      {{ lookup('ansible.builtin.env', 'MOLECULE_INCUS_TRANSPORT') | default('local', true) }}
+
+- name: Reject unsupported Incus lifecycle transports
+  ansible.builtin.assert:
+    that:
+      - molecule_incus_transport_mode in ['local', 'tls']
+    fail_msg: The Incus lifecycle transport must be local or explicitly admitted tls.
+
+- name: Resolve Incus transport locality
+  ansible.builtin.set_fact:
+    molecule_incus_is_remote: "{{ molecule_incus_transport_mode == 'tls' }}"
+    molecule_incus_transport_facts:
+      mode: "{{ molecule_incus_transport_mode }}"
+      project: ""
+      binding_sha256: ""
+
+- name: Read the admitted TLS binding and authenticated remote server facts
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [
+          'python3',
+          incus_resource_helper,
+          '--repository', molecule_incus_identity_effective.repository,
+          '--run-id', molecule_incus_identity_effective.run_id,
+          '--attempt', molecule_incus_identity_effective.attempt,
+          '--owner', molecule_incus_owner_effective,
+          '--platforms', (
+            (molecule_incus_instances | map(attribute='name') | list)
+            | zip(molecule_incus_instances | map(attribute='type', default='container') | list)
+            | list | to_json
+          )
+        ]
+        + (
+            ['--capacity', '--requests', molecule_incus_resource_requests | to_json]
+            if molecule_incus_transport_require_capacity | default(false) | bool else []
+          )
+      }}
+  vars:
+    incus_resource_helper: >-
+      {{
+        lookup(
+            'ansible.builtin.first_found',
+            {
+              'files': [
+                playbook_dir ~ '/helpers/tls_transport.py',
+                playbook_dir ~ '/../shared/incus/helpers/tls_transport.py',
+                playbook_dir ~ '/../incus/helpers/tls_transport.py'
+              ]
+            }
+          )
+      }}
+  register: molecule_incus_transport_readback
+  changed_when: false
+  when: molecule_incus_is_remote | bool
+
+- name: Retain only sanitized remote transport facts
+  ansible.builtin.set_fact:
+    molecule_incus_transport_facts: "{{ molecule_incus_transport_readback.stdout | from_json }}"
+  when: molecule_incus_is_remote | bool
+
+- name: Read the local Incus project and storage capacity
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ incus_resource_helper }}"
+      - --local
+      - --owner
+      - "{{ molecule_incus_owner_effective }}"
+      - --platforms
+      - >-
+        {{
+          dict((molecule_incus_instances | map(attribute='name') | list)
+          | zip(molecule_incus_instances | map(attribute='type', default='container') | list)) | to_json
+        }}
+      - --requests
+      - "{{ molecule_incus_resource_requests | to_json }}"
+  vars:
+    incus_resource_helper: >-
+      {{
+        lookup(
+            'ansible.builtin.first_found',
+            {
+              'files': [
+                playbook_dir ~ '/helpers/tls_transport.py',
+                playbook_dir ~ '/../shared/incus/helpers/tls_transport.py',
+                playbook_dir ~ '/../incus/helpers/tls_transport.py'
+              ]
+            }
+          )
+      }}
+  register: molecule_incus_local_resource_readback
+  changed_when: false
+  when:
+    - not molecule_incus_is_remote | bool
+    - molecule_incus_transport_require_capacity | default(false) | bool
+
+- name: Retain the local Incus resource plan
+  ansible.builtin.set_fact:
+    molecule_incus_transport_facts: >-
+      {{ molecule_incus_transport_facts | combine(molecule_incus_local_resource_readback.stdout | from_json) }}
+  when:
+    - not molecule_incus_is_remote | bool
+    - molecule_incus_transport_require_capacity | default(false) | bool

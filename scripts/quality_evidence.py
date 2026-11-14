@@ -12,6 +12,7 @@ import argparse
 import copy
 import gzip
 import hashlib
+import importlib
 import io
 import json
 import os
@@ -572,9 +573,21 @@ def _scan_archive(path: Path, relative: str) -> tuple[list[dict[str, str]], int,
     return findings, scanned, errors
 
 
-def scan_evidence(root: Path) -> dict[str, Any]:
+def _final_verifier() -> Any:
+    # Package and direct-script entry points share the same fixed sibling. Keep
+    # this lazy: copied preliminary/legacy collectors do not need the verifier.
+    prefix = __package__ + "." if __package__ else ""
+    return importlib.import_module(prefix + "g06_final_quality")
+
+
+def scan_evidence(root: Path, *, final_inputs=None) -> dict[str, Any]:
     """Scan final text, binary, and archive content without recording values."""
 
+    masks = {}
+    if final_inputs is not None:
+        g06_final_quality = _final_verifier()
+
+        masks = g06_final_quality.scanner_payloads(final_inputs)
     findings: list[dict[str, str]] = []
     errors: list[str] = []
     files_scanned = 0
@@ -598,6 +611,11 @@ def scan_evidence(root: Path) -> dict[str, Any]:
         except (OSError, EvidenceError) as error:
             errors.append(f"{relative}: {error}")
             continue
+        if path.resolve() in masks:
+            original, scanned = masks[path.resolve()]
+            if data != original:
+                raise EvidenceError("verified final envelope changed during scan")
+            data = scanned
         findings.extend(_scan_payload(data, relative))
         archive_findings, member_count, archive_errors = _scan_archive(path, relative)
         findings.extend(archive_findings)
@@ -1193,6 +1211,8 @@ def _cell_manifest_references(input_root: Path, excluded_resolved: Sequence[Path
         excluded_resolved=excluded_resolved,
     ):
         relative = manifest_path.relative_to(input_root)
+        if "root-final-inputs" in relative.parts:
+            continue
         current = input_root
         for part in relative.parts:
             current /= part
@@ -1284,6 +1304,8 @@ def copy_artifacts(input_roots: Sequence[Path], destination_root: Path, excluded
         cell_roots, cell_references = _cell_manifest_references(input_root, excluded_resolved)
         for source in _bounded_artifact_walk(input_root, excluded_resolved=excluded_resolved):
             relative_source = source.relative_to(input_root)
+            if "root-final-inputs" in relative_source.parts:
+                continue  # Retained proof bytes are copied separately, never duplicate reports.
             if source.is_symlink():
                 raise EvidenceError(f"symlinked artifact input: {relative_source.as_posix()}")
             if not source.is_file():
@@ -3011,7 +3033,7 @@ def _version_environment() -> tuple[dict[str, str], dict[str, str]]:
     return dict(sorted(tools.items())), dict(sorted(applications.items()))
 
 
-def _prerequisite_statuses() -> tuple[dict[str, str], list[str]]:
+def _prerequisite_statuses(*, preliminary: bool = False) -> tuple[dict[str, str], list[str]]:
     raw = os.getenv("QUALITY_EVIDENCE_PREREQUISITES_JSON") or os.getenv("QUALITY_EVIDENCE_PREREQUISITES")
     if not raw:
         return {}, []
@@ -3029,7 +3051,7 @@ def _prerequisite_statuses() -> tuple[dict[str, str], list[str]]:
             errors.append(f"unknown mandatory prerequisite status: {name}")
         status = value if isinstance(value, str) else str(value)
         statuses[name] = status
-        if status != "success":
+        if status != "success" and not (preliminary and name == "destroy" and status == "pending"):
             errors.append(f"mandatory prerequisite {name} concluded {status or 'unknown'}")
     for name in MANDATORY_PREREQUISITES:
         if name not in statuses:
@@ -3188,7 +3210,7 @@ def _evaluate_expected(expected: list[dict[str, Any]], actual: Sequence[dict[str
     return blockers
 
 
-def _manifest_logic_failures(manifest: dict[str, Any], *, release_mode: bool) -> list[str]:
+def _manifest_logic_failures(manifest: dict[str, Any], *, release_mode: bool, preliminary: bool = False) -> list[str]:
     failures: list[str] = []
     results = manifest.get("results", [])
     if not isinstance(results, list) or not results:
@@ -3264,9 +3286,53 @@ def _manifest_logic_failures(manifest: dict[str, Any], *, release_mode: bool) ->
         if names and names != set(MANDATORY_PREREQUISITES):
             failures.append("mandatory prerequisite status names are incomplete or unknown")
         for name, status in prerequisites.items():
-            if status != "success":
+            if status != "success" and not (preliminary and name == "destroy" and status == "pending"):
                 failures.append(f"mandatory prerequisite {name} did not succeed")
     return sorted(set(failures))
+
+
+def _input_acceptance(input_roots, previous, *, preliminary, candidate_mode, expected_commit, final_inputs):
+    """A copied report cannot shed its original pending/candidate acceptance barrier."""
+    manifests = {}
+    for root in [*input_roots, previous]:
+        if not root.exists():
+            continue
+        if root.is_symlink():
+            raise EvidenceError("symlinked acceptance input")
+        for path in _bounded_artifact_walk(root, name="manifest.json"):
+            if path.is_symlink() or not path.is_file():
+                raise EvidenceError("invalid acceptance manifest")
+            value = _strict_json_loads(_bounded_read(path).decode("utf-8"))
+            if not isinstance(value, dict):
+                raise EvidenceError("invalid acceptance manifest object")
+            manifests[path.parent.resolve()] = value
+    proofs = []
+    if final_inputs is not None:
+        proofs.append(final_inputs)
+    # Ordinary business evidence never imports cryptographic dependencies or needs network access.
+    persisted = [
+        (root, value)
+        for root, value in manifests.items()
+        if "root_final_quality_inputs" in value or (root / "root-final-inputs").exists()
+    ]
+    if persisted or proofs:
+        final_quality = _final_verifier()
+
+        for root, value in persisted:
+            proofs.append(final_quality.verify_persisted_inputs(root, value, source_sha=expected_commit))
+        proof = final_quality.combine_inputs(proofs)
+        authorized = final_quality.authorized_roots(proof)
+    else:
+        proof, authorized = None, set()
+    for root, value in manifests.items():
+        if value.get("mode") == "candidate" and not candidate_mode:
+            raise EvidenceError("candidate input cannot authorize final evidence")
+        if "root_finalization" in value:
+            if value["root_finalization"] != "pending":
+                raise EvidenceError("unknown Root finalization state")
+            if not preliminary and root not in authorized:
+                raise EvidenceError("pending input lacks independently verified Root finalization")
+    return proof
 
 
 def assemble(
@@ -3283,9 +3349,13 @@ def assemble(
     run_attempt: str | None = None,
     release_mode: bool = False,
     candidate_mode: bool = False,
+    preliminary: bool = False,
     expected_commit: str | None = None,
     mandatory_scenarios: Sequence[str] = (),
+    final_inputs=None,
 ) -> int:
+    if preliminary and release_mode:
+        raise EvidenceError("preliminary evidence cannot authorize release acceptance")
     root = root.resolve()
     repository_root = (repository_root or Path.cwd()).resolve()
     input_roots = [path.resolve() for path in (input_roots or [root.parent])]
@@ -3297,6 +3367,18 @@ def assemble(
     commit_sha = _tested_commit()
     expected_commit = expected_commit or os.getenv("QUALITY_EVIDENCE_EXPECTED_COMMIT") or commit_sha
     commit_consistent = _valid_commit(commit_sha) and commit_sha == expected_commit
+    try:
+        supplied_proof = final_inputs
+        final_inputs = _input_acceptance(
+            input_roots,
+            root,
+            preliminary=preliminary,
+            candidate_mode=candidate_mode,
+            expected_commit=expected_commit,
+            final_inputs=final_inputs,
+        )
+    except (ValueError, ImportError, OSError, KeyError, TypeError) as error:
+        raise EvidenceError("input acceptance provenance verification held") from error
     stage = _prepare_stage(root)
     try:
         metadata = _write_metadata(
@@ -3307,6 +3389,15 @@ def assemble(
             run_attempt=attempt,
         )
         junit_paths = copy_artifacts(input_roots, stage, excluded=(root, stage))
+        final_references = []
+        physical_cells = set()
+        retained = set()
+        if final_inputs is not None:
+            final_quality = _final_verifier()
+
+            final_references, final_inputs = final_quality.persist_inputs(final_inputs, stage)
+            retained = final_quality.retained_paths(final_inputs)
+            physical_cells = final_quality.physical_cells(final_inputs)
         default_roles = list(roles)
         default_profiles = [normalize_profile(item) for item in profiles]
         default_scenarios = list(scenarios or mandatory_scenarios)
@@ -3487,7 +3578,10 @@ def assemble(
                 except EvidenceError as error:
                     parse_failures.append(f"{relative}: {error}")
                     continue
-                if role_report["framework"] == "pytest":
+                if (
+                    role_report["framework"] == "pytest"
+                    or (identity.profile.replace("-", "_"), identity.scenario, identity.target) in physical_cells
+                ):
                     allure, allure_failures = _native_matches(
                         role_report["test_cases"],
                         native_allure,
@@ -3594,7 +3688,7 @@ def assemble(
             repository_root=repository_root,
             matrix_cells=expected,
         )
-        prerequisites, prerequisite_errors = _prerequisite_statuses()
+        prerequisites, prerequisite_errors = _prerequisite_statuses(preliminary=preliminary)
         blockers = (
             list(registry_errors)
             + parse_failures
@@ -3609,13 +3703,18 @@ def assemble(
 
         canary_path = stage / "logs" / "redaction-canary-proof.log"
         canary_path.write_text(f"password={CANARY}\n", encoding="utf-8")
-        before_scan = scan_evidence(stage)
+        before_scan = scan_evidence(stage, final_inputs=final_inputs)
         if not any(item["kind"] == "canary" for item in before_scan["findings"]):
             raise EvidenceError("evidence scanner did not detect the synthetic canary before redaction")
         for path in sorted(stage.rglob("*")):
-            if path.is_file() and not path.is_symlink() and "checksums" not in path.relative_to(stage).parts:
+            if (
+                path.is_file()
+                and not path.is_symlink()
+                and "checksums" not in path.relative_to(stage).parts
+                and path.resolve() not in retained
+            ):
                 redact_file(path)
-        final_scan = scan_evidence(stage)
+        final_scan = scan_evidence(stage, final_inputs=final_inputs)
         scan_summary = {
             "scanner": "quality-evidence-stdlib-v1",
             "canary_detected_before_redaction": True,
@@ -3625,7 +3724,7 @@ def assemble(
             json.dumps(scan_summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
         # Scan the summary itself as part of the final evidence set.
-        final_scan = scan_evidence(stage)
+        final_scan = scan_evidence(stage, final_inputs=final_inputs)
         scan_summary.update(
             {
                 "clean": final_scan["clean"],
@@ -3683,9 +3782,18 @@ def assemble(
             },
             "release_eligible": False,
         }
+        if final_references:
+            manifest["root_final_quality_inputs"] = final_references
         manifest = redact_strings(manifest)
-        execution_passed = not _manifest_logic_failures(manifest, release_mode=release_mode)
-        if candidate_mode:
+        execution_passed = not _manifest_logic_failures(manifest, release_mode=release_mode, preliminary=preliminary)
+        if preliminary:
+            # This is a sanitized execution export, before the native job ends.
+            # Only Root can subsequently attest terminal success and destruction.
+            manifest["root_finalization"] = "pending"
+            manifest["execution_success"] = execution_passed
+            manifest["candidate_execution_passed"] = False
+            manifest["release_eligible"] = False
+        elif candidate_mode:
             manifest["candidate_execution_passed"] = execution_passed
             manifest["release_eligible"] = False
         else:
@@ -3700,7 +3808,7 @@ def assemble(
             "".join(f"{sha256(path)}  {path.relative_to(stage).as_posix()}\n" for path in paths),
             encoding="utf-8",
         )
-        post_checksum_scan = scan_evidence(stage)
+        post_checksum_scan = scan_evidence(stage, final_inputs=final_inputs)
         if not post_checksum_scan["clean"]:
             problem_paths = [f"{item['path']} ({item['kind']})" for item in post_checksum_scan["findings"]] + list(
                 post_checksum_scan["errors"]
@@ -3709,6 +3817,10 @@ def assemble(
                 "final checksummed evidence failed text/binary/archive secret scanning: " + "; ".join(problem_paths)
             )
         _replace_root(stage, root)
+        if final_inputs is not None:
+            final_quality.relocate_inputs(final_inputs, stage, root)
+            if supplied_proof is not None:
+                final_quality.share_verified_inputs(supplied_proof, final_inputs)
         return 0 if execution_passed else 1
     except Exception:
         shutil.rmtree(stage, ignore_errors=True)
@@ -3807,6 +3919,10 @@ def _manifest_structure_failures(manifest: dict[str, Any]) -> list[str]:
     }
     missing = sorted(required - set(manifest))
     failures.extend(f"manifest lacks required field {name}" for name in missing)
+    if "root_finalization" in manifest:
+        if manifest["root_finalization"] != "pending":
+            failures.append("manifest has an unknown Root finalization state")
+        failures.append("manifest awaits Root finalization and is not final quality evidence")
     if manifest.get("schema_version") != 2:
         failures.append("manifest schema_version is not 2")
     if manifest.get("mode") not in {"ci", "candidate", "release"}:
@@ -4151,6 +4267,7 @@ def validate(
     release_mode: bool | None = None,
     expected_commit: str | None = None,
     repository_root: Path | None = None,
+    final_inputs=None,
 ) -> int:
     root = root.resolve()
     manifest_path = root / "manifest.json"
@@ -4171,6 +4288,24 @@ def validate(
         return 1
     if not isinstance(manifest, dict):
         print("evidence validation failed: manifest is not an object", file=sys.stderr)
+        return 1
+    if "root_final_quality_inputs" in manifest or (root / "root-final-inputs").exists():
+        try:
+            final_quality = _final_verifier()
+
+            if final_inputs is None:
+                final_inputs = final_quality.verify_persisted_inputs(
+                    root,
+                    manifest,
+                    source_sha=expected_commit or os.getenv("QUALITY_EVIDENCE_EXPECTED_COMMIT") or _tested_commit(),
+                )
+            else:
+                final_quality.require_persisted_binding(final_inputs, root, manifest)
+        except (ValueError, ImportError, OSError, KeyError, TypeError):
+            print("evidence validation held: physical final proof unavailable or invalid", file=sys.stderr)
+            return 1
+    elif final_inputs is not None:
+        print("evidence validation held: physical proof mapping missing", file=sys.stderr)
         return 1
     failures.extend(_manifest_structure_failures(manifest))
     failures.extend(_validate_checksums(root, checksum_path))
@@ -4301,7 +4436,11 @@ def validate(
         }
         if observed_status != derived_status:
             failures.append("manifest matrix statuses differ from re-derived results")
-    final_scan = scan_evidence(root)
+    try:
+        final_scan = scan_evidence(root, final_inputs=final_inputs)
+    except ValueError:
+        print("evidence validation held: physical verification phase unavailable or expired", file=sys.stderr)
+        return 1
     if not final_scan["clean"]:
         failures.append("final evidence contains secret-like data or an unscannable archive")
     if failures:
@@ -4335,6 +4474,9 @@ def build_parser(*, default_release: bool = False) -> argparse.ArgumentParser:
         default="release" if default_release else "ci",
     )
     parser.add_argument("--release", action="store_true", help="Require release supply-chain evidence")
+    parser.add_argument(
+        "--preliminary", action="store_true", help="Assemble an execution export without final quality acceptance"
+    )
     return parser
 
 
@@ -4351,6 +4493,8 @@ def main(
     candidate_mode = args.mode == "candidate"
     roles = args.role or list(default_roles)
     try:
+        if args.preliminary and args.command != "assemble":
+            raise EvidenceError("--preliminary is only valid for assemble")
         if args.command == "record":
             record_roles = [item for item in (args.roles or "").split(",") if item.strip()] or roles
             if len(args.scenario) != 1 or len(args.profile) != 1 or len(args.target) != 1:
@@ -4384,6 +4528,7 @@ def main(
                 run_attempt=args.run_attempt,
                 release_mode=release_mode,
                 candidate_mode=candidate_mode,
+                preliminary=args.preliminary,
                 expected_commit=args.expected_commit,
                 mandatory_scenarios=mandatory_scenarios,
             )

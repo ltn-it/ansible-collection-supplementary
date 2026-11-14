@@ -1,8 +1,7 @@
 """Check installed Vault module contracts in the mandatory Devtools test gate.
 
-The role-quality-python-tests pre-commit hook discovers all tests/ inside pinned
-Devtools. Keep this collection-dependent test outside tests/unit: the additional
-native CI unit job intentionally provisions ansible-core without collections.
+Both the role-quality-python-tests hook and native policy unit job discover all
+tests/ inside pinned Devtools, including its declared collection dependencies.
 """
 
 from __future__ import annotations

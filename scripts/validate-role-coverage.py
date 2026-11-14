@@ -1282,6 +1282,10 @@ def validate_registry(
         scenario_profile = scenario.get("profile")
         if scenario_profile not in PROFILES:
             errors.append(f"{prefix} has invalid profile: {scenario_profile!r}")
+        if "instance_type" in scenario and (
+            not isinstance(scenario["instance_type"], str) or scenario["instance_type"] not in {"container", "vm"}
+        ):
+            errors.append(f"{prefix}.instance_type must be container or vm when declared")
         state = scenario.get("state")
         if state not in REQUIRED_PROFILE_STATES:
             errors.append(f"{prefix} has invalid state: {state!r}")
@@ -1519,6 +1523,10 @@ def render_document(registry: dict[str, Any]) -> str:
             "",
             "## Scenarios",
             "",
+            "A scenario may explicitly declare `instance_type: container` or `instance_type: vm`; "
+            "otherwise its matrix cells retain the target's instance type. This execution setting "
+            "does not change scenario eligibility, role maturity, target disposition, or release requirements.",
+            "",
             "| Scenario | Profile | State | Implementation | Reported roles | "
             "Exercised dependencies | Test application mode | Application claims | "
             "Application policy rationale | JUnit | Allure | Evidence |",
@@ -1611,6 +1619,9 @@ def build_matrix(
         scenario_targets = _shared_scenario_target_set(roles, scenario_name, production_roles, target_field)
         for target in sorted(scenario_targets & set(registry["targets"])):
             target_definition = registry["targets"][target]
+            instance_type = scenario.get("instance_type", target_definition["instance_type"])
+            if not isinstance(instance_type, str) or instance_type not in {"container", "vm"}:
+                raise ValueError(f"scenario {scenario_name}.instance_type must be container or vm when declared")
             components = sorted({roles[role]["component"] for role in production_roles})
             cell: dict[str, Any] = {
                 "scenario": scenario_name,
@@ -1619,7 +1630,7 @@ def build_matrix(
                 "target": target,
                 "target_disposition": target_disposition,
                 "release_required": target_disposition == "supported",
-                "instance_type": target_definition["instance_type"],
+                "instance_type": instance_type,
                 "runner": target_definition["runner"],
                 "roles": production_roles,
                 "junit": scenario["junit"],

@@ -1,0 +1,4 @@
+---
+bugfixes:
+  - Runtime evidence uses an isolated disk-backed temporary directory for Trivy database downloads,
+    preventing the scanner's bounded in-memory temporary filesystem from filling during database updates.

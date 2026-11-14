@@ -712,7 +712,7 @@ class ExactRevisionWorkflowContractTests(unittest.TestCase):
         self.assertNotIn(".head_sha == $controller_sha", human_path)
 
     def test_release_app_pr_creators_finalize_draft_once(self) -> None:
-        # Release metadata still needs Exact-Revision review. A develop-to-main
+        # Release metadata uses native common review. A develop-to-main
         # promotion instead opens with v2 native-ingress aggregation evidence.
         for name in (
             "release-prepare.yml",
@@ -723,13 +723,13 @@ class ExactRevisionWorkflowContractTests(unittest.TestCase):
                 self.assertIn("--draft", workflow)
                 self.assertIn("gh pr ready", workflow)
                 self.assertIn("lightning-it-release-automation[bot]", workflow)
-                self.assertIn("gh workflow run release-bot-exact-head-review.yml", workflow)
-                self.assertIn("permission-actions: write", workflow)
-                self.assertIn("expected_base=", workflow)
-                self.assertIn("expected_head=", workflow)
+                self.assertNotIn("gh workflow run release-bot-exact-head-review.yml", workflow)
+                self.assertIn("permission-actions: read", workflow)
+                self.assertIn(".base.sha == $base", workflow)
+                self.assertIn(".head.sha == $head", workflow)
                 self.assertLess(
                     workflow.index("gh pr ready"),
-                    workflow.index("gh workflow run release-bot-exact-head-review.yml"),
+                    workflow.index("Native common control evaluates"),
                 )
         ancestry = (ROOT / ".github/workflows/sync-main-to-develop.yml").read_text(encoding="utf-8")
         self.assertNotIn("--draft", ancestry)
@@ -749,10 +749,7 @@ class ExactRevisionWorkflowContractTests(unittest.TestCase):
         self.assertIn('gh pr ready "$existing" --repo "$GITHUB_REPOSITORY"', release_prepare)
         release_edit = release_prepare.split('gh pr edit "$existing"', 1)[1].split("--title", 1)[0]
         self.assertIn('--repo "$GITHUB_REPOSITORY"', release_edit)
-        release_dispatch = release_prepare.split("gh workflow run release-bot-exact-head-review.yml", 1)[1].split(
-            "expected_head", 1
-        )[0]
-        self.assertIn('--repo "$GITHUB_REPOSITORY"', release_dispatch)
+        self.assertNotIn("gh workflow run release-bot-exact-head-review.yml", release_prepare)
 
     def test_exact_revision_result_is_validated_as_one_object(self) -> None:
         workflow = (ROOT / ".github/workflows/release-bot-exact-head-review.yml").read_text(encoding="utf-8")
@@ -761,14 +758,14 @@ class ExactRevisionWorkflowContractTests(unittest.TestCase):
 
     def test_main_backmerge_has_deterministic_reviewable_evidence(self) -> None:
         workflow = (ROOT / ".github/workflows/sync-main-to-develop.yml").read_text(encoding="utf-8")
-        changelog_policy = (ROOT / "scripts/devtools-changelog-check.sh").read_text(encoding="utf-8")
         self.assertIn("Create reviewable ancestry backmerge", workflow)
         self.assertIn("git merge --no-ff --no-commit --strategy=ours origin/main", workflow)
         self.assertIn("evidence_path='.lit/main-ancestry.json'", workflow)
         self.assertIn('test "$(git diff --name-only origin/develop HEAD --)"', workflow)
         self.assertNotIn("Create file-identical ancestry backmerge", workflow)
         self.assertNotIn("git diff --quiet origin/develop HEAD", workflow)
-        self.assertIn('non_user_visible_re+="\\\\.lit/main-ancestry\\\\.json$|"', changelog_policy)
+        # ChangelogMetadataTests exercise the real Git/Bash classification of
+        # .lit/main-ancestry.json; the obsolete single-file regex is not a contract.
 
         evidence = json.loads((ROOT / ".lit/main-ancestry.json").read_text(encoding="utf-8"))
         self.assertEqual(evidence["schema_version"], 1)
