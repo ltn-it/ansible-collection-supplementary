@@ -161,23 +161,44 @@
     - postgres_backup_restore_action == 'restore'
   tags: always
 
-- name: Validate optional scheduled backup output file
+- name: Validate optional PostgreSQL operations log file
   ansible.builtin.assert:
     that:
-      - postgres_backup_restore_schedule_output_file is string
+      - postgres_backup_restore_operations_log_file is string
       - >-
-        postgres_backup_restore_schedule_output_file == '' or
-        postgres_backup_restore_schedule_output_file ==
+        postgres_backup_restore_operations_log_file == '' or
+        postgres_backup_restore_operations_log_file ==
         '/var/log/postgres-backup/' ~ postgres_backup_restore_schedule_instance ~ '/operations.log'
       - >-
-        postgres_backup_restore_schedule_output_file == '' or
-        not postgres_backup_restore_schedule_output_file.startswith(postgres_backup_restore_backup_dir + '/')
+        postgres_backup_restore_operations_log_file == '' or
+        not postgres_backup_restore_operations_log_file.startswith(postgres_backup_restore_backup_dir + '/')
       - >-
-        postgres_backup_restore_schedule_output_file == '' or
-        not postgres_backup_restore_schedule_output_file.startswith(postgres_backup_restore_schedule_pgdata_dir + '/')
+        postgres_backup_restore_operations_log_file == '' or
+        not postgres_backup_restore_operations_log_file.startswith(postgres_backup_restore_schedule_pgdata_dir + '/')
+      - >-
+        postgres_backup_restore_operations_log_file == '' or
+        postgres_backup_restore_operations_log_file not in
+        [postgres_backup_restore_backup_dir, postgres_backup_restore_schedule_pgdata_dir,
+         postgres_backup_restore_file, postgres_backup_restore_restore_source]
     quiet: true
     fail_msg: Use the instance-specific operations.log outside backup data and PGDATA, or keep journald.
   when:
-    - postgres_backup_restore_action == 'schedule'
-    - postgres_backup_restore_schedule_state == 'present'
+    - postgres_backup_restore_action in ['schedule', 'backup', 'restore']
+    - postgres_backup_restore_action != 'schedule' or postgres_backup_restore_schedule_state == 'present'
+  tags: always
+
+- name: Require explicit existing account settings for PostgreSQL operation logs
+  ansible.builtin.assert:
+    that:
+      - postgres_backup_restore_schedule_instance is match('^[A-Za-z_][A-Za-z0-9_-]{0,62}$')
+      - postgres_backup_restore_schedule_user is match('^[A-Za-z_][A-Za-z0-9_-]{0,31}$')
+      - postgres_backup_restore_schedule_group is match('^[A-Za-z_][A-Za-z0-9_-]{0,31}$')
+      - postgres_backup_restore_schedule_uid | int > 0
+      - postgres_backup_restore_schedule_home is match('^/[A-Za-z0-9_./-]+$')
+      - postgres_backup_restore_schedule_pgdata_dir is match('^/[A-Za-z0-9_./-]+$')
+    quiet: true
+    fail_msg: Operational file logging requires the explicit prepared backup account, home and PGDATA.
+  when:
+    - postgres_backup_restore_action in ['schedule', 'backup', 'restore']
+    - postgres_backup_restore_operations_log_file | length > 0
   tags: always

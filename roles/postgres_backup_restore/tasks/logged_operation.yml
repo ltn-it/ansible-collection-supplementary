@@ -1,0 +1,57 @@
+---
+- name: Run the explicitly requested database operation with direct protected logging
+  ansible.builtin.shell: |
+    umask 077
+    printf '%s START %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      {{ postgres_backup_restore_action | quote }} \
+      >> {{ postgres_backup_restore_operations_log_file | quote }} || exit 74
+    {% if postgres_backup_restore_action == 'backup' %}
+    {{ postgres_backup_restore_logged_argv | map('quote') | join(' ') }} \
+      > {{ postgres_backup_restore_file | quote }} \
+      2>> {{ postgres_backup_restore_operations_log_file | quote }}
+    {% else %}
+    {{ postgres_backup_restore_logged_argv | map('quote') | join(' ') }} \
+      < {{ postgres_backup_restore_restore_source | quote }} \
+      >> {{ postgres_backup_restore_operations_log_file | quote }} 2>&1
+    {% endif %}
+    operation_rc=$?
+    printf '%s END %s rc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      {{ postgres_backup_restore_action | quote }} "$operation_rc" \
+      >> {{ postgres_backup_restore_operations_log_file | quote }} || exit 74
+    exit "$operation_rc"
+  vars:
+    postgres_backup_restore_logged_prefix: >-
+      {{ ['podman', 'exec', '-i', '--env', 'PGPASSWORD', postgres_backup_restore_container_name]
+         if postgres_backup_restore_execution_mode == 'podman' else [] }}
+    postgres_backup_restore_logged_connection: >-
+      {{ ['--host', postgres_backup_restore_db_host, '--port', postgres_backup_restore_db_port | string,
+          '--username', postgres_backup_restore_db_user] }}
+    postgres_backup_restore_logged_backup: >-
+      {{ ['pg_dump'] + postgres_backup_restore_logged_connection +
+         ['--format', ('custom' if postgres_backup_restore_format == 'custom' else 'plain')] +
+         postgres_backup_restore_extra_pg_dump_args + [postgres_backup_restore_db_name] }}
+    postgres_backup_restore_logged_custom_restore: >-
+      {{ ['pg_restore'] + postgres_backup_restore_logged_connection +
+         ['--dbname', postgres_backup_restore_db_name] +
+         (['--clean'] if postgres_backup_restore_clean | bool else []) +
+         (['--if-exists'] if postgres_backup_restore_if_exists | bool else []) +
+         (['--create'] if postgres_backup_restore_create_db | bool else []) +
+         postgres_backup_restore_extra_pg_restore_args }}
+    postgres_backup_restore_logged_plain_restore: >-
+      {{ ['psql'] + postgres_backup_restore_logged_connection +
+         ['--dbname', postgres_backup_restore_db_name] + postgres_backup_restore_extra_psql_args +
+         ['--set', 'ON_ERROR_STOP=1'] }}
+    postgres_backup_restore_logged_argv: >-
+      {{ postgres_backup_restore_logged_prefix +
+         (postgres_backup_restore_logged_backup if postgres_backup_restore_action == 'backup' else
+          (postgres_backup_restore_logged_custom_restore if postgres_backup_restore_format == 'custom'
+           else postgres_backup_restore_logged_plain_restore)) }}
+  become: true
+  become_user: "{{ postgres_backup_restore_schedule_user }}"
+  environment: >-
+    {{ postgres_backup_restore_schedule_environment |
+       combine({'PGPASSWORD': postgres_backup_restore_db_password}) }}
+  args:
+    chdir: "{{ postgres_backup_restore_schedule_home }}"
+  no_log: true
+  changed_when: true

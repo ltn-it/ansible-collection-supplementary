@@ -15,8 +15,8 @@ NoNewPrivileges=true
 KillMode=control-group
 TimeoutStartSec={{ (postgres_backup_restore_schedule_timeout_seconds | int) + 60 }}
 ExecStart={{ postgres_backup_restore_schedule_python_binary }} {{ postgres_backup_restore_schedule_worker }} --config {{ postgres_backup_restore_schedule_config }} --run --kind scheduled
-{% if postgres_backup_restore_schedule_output_file | length > 0 %}
-StandardOutput=append:{{ postgres_backup_restore_schedule_output_file }}
+{% if postgres_backup_restore_operations_log_file | length > 0 %}
+StandardOutput=append:{{ postgres_backup_restore_operations_log_file }}
 StandardError=inherit
 {% else %}
 StandardOutput=journal

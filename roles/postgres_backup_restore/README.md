@@ -191,9 +191,9 @@ MIT.
 
 Lightning IT.
 
-### Optional scheduled operational log
+### Optional shared operational log
 
-`postgres_backup_restore_schedule_output_file` defaults to empty (journal).
+`postgres_backup_restore_operations_log_file` defaults to empty (journal).
 An explicit `/var/log/postgres-backup/<instance>/operations.log` uses systemd's
 `StandardOutput=append:` and inherited stderr; the shared worker is unchanged.
 The role prepares a protected root-owned instance directory and a private file
@@ -204,5 +204,12 @@ and foreign existing files are rejected. This requires a systemd version support
 The consumer must include this file in PostgreSQL's rotation/archive budget.
 An existing open descriptor needs a compatible rotation strategy; `copytruncate`
 has a record-loss window. Removing a schedule preserves operational logs.
-This option covers the scheduled worker output only: interactive backup/restore
-operation events and real systemd/SELinux/rotation tests remain separate work.
+Manual backup/restore actions use the same protected file when explicitly enabled:
+quoted native database commands append stdout/stderr directly with UTC START/END
+and exit status. Backup dump bytes remain in the backup file, never in the log.
+Plain SQL restores enforce ON_ERROR_STOP=1 so SQL errors fail the command.
+Ansible hides command output unconditionally on this path. Podman receives the
+password from the task environment rather than its command line. No installed
+capture helper or daemon is used. The caller must supply the same existing account,
+UID, home and PGDATA as for scheduled backups. Full database/SELinux/systemd and
+concurrent rotation tests remain required; command fixtures do not prove restore.

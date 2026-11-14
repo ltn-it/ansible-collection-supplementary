@@ -15,8 +15,8 @@
       - "{{ postgres_backup_restore_schedule_config }}"
       - "/etc/cron.d/{{ postgres_backup_restore_schedule_cron_file }}"
       - >-
-        {{ postgres_backup_restore_schedule_output_file
-           if postgres_backup_restore_schedule_output_file | length > 0 else '/var/log' }}
+        {{ postgres_backup_restore_operations_log_file
+           if postgres_backup_restore_operations_log_file | length > 0 else '/var/log' }}
   changed_when: false
   check_mode: false
 
@@ -184,7 +184,7 @@
 
 - name: Prepare standard systemd backup output when explicitly selected
   ansible.builtin.include_tasks: schedule_output.yml
-  when: postgres_backup_restore_schedule_output_file | length > 0
+  when: postgres_backup_restore_operations_log_file | length > 0
 
 - name: Install PostgreSQL backup user units
   ansible.builtin.template:

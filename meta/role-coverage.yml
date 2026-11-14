@@ -1630,11 +1630,12 @@ roles:
       - "Scheduled backups do not configure external transport, alert delivery, WAL archival or host recovery."
       - "A shared backup worker is retained on instance removal; all its consumers must use the same version."
       - >-
-        Optional scheduled-log capture consumes an existing protected component policy;
-        native lifecycle and independent manual restore logging require separate acceptance.
+        Optional standard operational file logging covers scheduled output and manual command output;
+        real database, systemd, SELinux and rotation behavior require separate acceptance.
     deprecation_state: "active"
     scenario_support:
-      tiny: []
+      tiny:
+        - "postgres-backup-restore-basic"
       heavy: []
       application_acceptance: []
   postgres_config:
@@ -3187,6 +3188,21 @@ scenarios:
       reason: >-
         Scenario is a role contract or assertion stub and does not deploy an independently versioned
         application.
+      dependencies: []
+  postgres-backup-restore-basic:
+    profile: "tiny"
+    state: "experimental"
+    implementation: "partial"
+    roles:
+      - "postgres_backup_restore"
+    junit: false
+    allure: false
+    evidence: false
+    test_application:
+      mode: "not-applicable"
+      reason: >-
+        Controller-only fresh-package assertion and template fixture, without a database,
+        output-directory convergence, systemd deployment or native restore acceptance.
       dependencies: []
   postgres-deploy-basic:
     profile: "tiny"

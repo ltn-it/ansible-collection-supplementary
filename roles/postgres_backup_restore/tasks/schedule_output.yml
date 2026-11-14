@@ -1,12 +1,55 @@
 ---
+- name: Reject symlinked ancestors of the selected operation log
+  ansible.builtin.command:
+    argv:
+      - "{{ postgres_backup_restore_schedule_python_binary }}"
+      - -c
+      - >-
+        import pathlib,sys;
+        sys.exit(any(part.is_symlink() for value in sys.argv[1:]
+        for part in (pathlib.Path(value), *pathlib.Path(value).parents)))
+      - "{{ postgres_backup_restore_operations_log_file }}"
+      - "{{ postgres_backup_restore_backup_dir }}"
+      - "{{ postgres_backup_restore_schedule_pgdata_dir }}"
+  changed_when: false
+  check_mode: false
+
+- name: Read the prepared operational log account
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ postgres_backup_restore_schedule_user }}"
+  register: postgres_backup_restore_output_account
+
+- name: Read the prepared operational log group
+  ansible.builtin.getent:
+    database: group
+    key: "{{ postgres_backup_restore_schedule_group }}"
+  register: postgres_backup_restore_output_group
+
+- name: Require the exact existing operational log account and primary group
+  ansible.builtin.assert:
+    that:
+      - >-
+        postgres_backup_restore_output_account.ansible_facts.getent_passwd[
+          postgres_backup_restore_schedule_user][1] | int == postgres_backup_restore_schedule_uid | int
+      - >-
+        postgres_backup_restore_output_account.ansible_facts.getent_passwd[
+          postgres_backup_restore_schedule_user][2] | int ==
+        postgres_backup_restore_output_group.ansible_facts.getent_group[
+          postgres_backup_restore_schedule_group][1] | int
+      - >-
+        postgres_backup_restore_output_account.ansible_facts.getent_passwd[
+          postgres_backup_restore_schedule_user][4] == postgres_backup_restore_schedule_home
+    quiet: true
+
 - name: Inspect the explicitly selected backup output paths
   ansible.builtin.stat:
     path: "{{ item }}"
     follow: false
   loop:
     - /var/log/postgres-backup
-    - "{{ postgres_backup_restore_schedule_output_file | dirname }}"
-    - "{{ postgres_backup_restore_schedule_output_file }}"
+    - "{{ postgres_backup_restore_operations_log_file | dirname }}"
+    - "{{ postgres_backup_restore_operations_log_file }}"
   register: postgres_backup_restore_output_paths
 
 - name: Require existing backup output directories to be protected root-owned directories
@@ -41,7 +84,7 @@
 
 - name: Prepare the protected instance output directory
   ansible.builtin.file:
-    path: "{{ postgres_backup_restore_schedule_output_file | dirname }}"
+    path: "{{ postgres_backup_restore_operations_log_file | dirname }}"
     state: directory
     owner: root
     group: "{{ postgres_backup_restore_schedule_group }}"
@@ -49,7 +92,7 @@
 
 - name: Prepare the standard append destination without changing existing content or timestamps
   ansible.builtin.file:
-    path: "{{ postgres_backup_restore_schedule_output_file }}"
+    path: "{{ postgres_backup_restore_operations_log_file }}"
     state: touch
     owner: "{{ postgres_backup_restore_schedule_user }}"
     group: "{{ postgres_backup_restore_schedule_group }}"

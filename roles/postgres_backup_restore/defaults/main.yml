@@ -77,4 +77,4 @@ postgres_backup_restore_schedule_environment:
   DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ postgres_backup_restore_schedule_uid }}/bus"
 
 # Empty keeps journald. Nonempty uses systemd append directly, without a capture worker.
-postgres_backup_restore_schedule_output_file: ""
+postgres_backup_restore_operations_log_file: ""
