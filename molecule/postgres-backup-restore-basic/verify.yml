@@ -20,3 +20,7 @@
           - "'podman-component' not in (postgres_backup_restore_test_service.content | b64decode)"
           - "'NoNewPrivileges=true' in (postgres_backup_restore_test_service.content | b64decode)"
           - "'KillMode=control-group' in (postgres_backup_restore_test_service.content | b64decode)"
+          - >-
+            'StandardOutput=append:/var/log/postgres-backup/fixture/operations.log'
+            in (postgres_backup_restore_test_service.content | b64decode)
+          - "'StandardError=inherit' in (postgres_backup_restore_test_service.content | b64decode)"

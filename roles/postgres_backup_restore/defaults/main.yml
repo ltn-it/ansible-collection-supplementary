@@ -75,3 +75,6 @@ postgres_backup_restore_schedule_environment:
   HOME: "{{ postgres_backup_restore_schedule_home }}"
   XDG_RUNTIME_DIR: "/run/user/{{ postgres_backup_restore_schedule_uid }}"
   DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ postgres_backup_restore_schedule_uid }}/bus"
+
+# Empty keeps journald. Nonempty uses systemd append directly, without a capture worker.
+postgres_backup_restore_schedule_output_file: ""

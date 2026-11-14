@@ -18,6 +18,7 @@
     postgres_backup_restore_container_name: fixture-postgres
     postgres_backup_restore_backup_dir: "{{ postgres_backup_restore_test_root }}/backups"
     postgres_backup_restore_schedule_instance: fixture
+    postgres_backup_restore_schedule_output_file: /var/log/postgres-backup/fixture/operations.log
     postgres_backup_restore_schedule_user: fixture
     postgres_backup_restore_schedule_group: fixture
     postgres_backup_restore_schedule_uid: "{{ postgres_backup_restore_test_identity.stdout | int }}"

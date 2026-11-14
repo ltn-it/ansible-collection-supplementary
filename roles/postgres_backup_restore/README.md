@@ -190,3 +190,19 @@ MIT.
 ## Author
 
 Lightning IT.
+
+### Optional scheduled operational log
+
+`postgres_backup_restore_schedule_output_file` defaults to empty (journal).
+An explicit `/var/log/postgres-backup/<instance>/operations.log` uses systemd's
+`StandardOutput=append:` and inherited stderr; the shared worker is unchanged.
+The role prepares a protected root-owned instance directory and a private file
+owned by the existing backup account, without truncating content. Symlinked paths
+and foreign existing files are rejected. This requires a systemd version supporting
+`append:`. No capture helper, wrapper or extra service is installed.
+
+The consumer must include this file in PostgreSQL's rotation/archive budget.
+An existing open descriptor needs a compatible rotation strategy; `copytruncate`
+has a record-loss window. Removing a schedule preserves operational logs.
+This option covers the scheduled worker output only: interactive backup/restore
+operation events and real systemd/SELinux/rotation tests remain separate work.

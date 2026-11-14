@@ -1,0 +1,58 @@
+---
+- name: Inspect the explicitly selected backup output paths
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - /var/log/postgres-backup
+    - "{{ postgres_backup_restore_schedule_output_file | dirname }}"
+    - "{{ postgres_backup_restore_schedule_output_file }}"
+  register: postgres_backup_restore_output_paths
+
+- name: Require existing backup output directories to be protected root-owned directories
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isdir | default(false) and not item.stat.islnk | default(false))
+      - not item.stat.exists or item.stat.uid == 0
+      - not item.stat.exists or not item.stat.woth | default(false)
+      - not item.stat.exists or not item.stat.wgrp | default(false)
+    quiet: true
+  loop: "{{ postgres_backup_restore_output_paths.results[:2] }}"
+
+- name: Refuse to repurpose a foreign or linked backup output file
+  ansible.builtin.assert:
+    that:
+      - >-
+        not postgres_backup_restore_output_paths.results[2].stat.exists or
+        (postgres_backup_restore_output_paths.results[2].stat.isreg | default(false) and
+         not postgres_backup_restore_output_paths.results[2].stat.islnk | default(false) and
+         postgres_backup_restore_output_paths.results[2].stat.nlink == 1 and
+         postgres_backup_restore_output_paths.results[2].stat.uid == postgres_backup_restore_schedule_uid | int and
+         postgres_backup_restore_output_paths.results[2].stat.mode == '0600')
+    quiet: true
+
+- name: Create the standard backup logging parent
+  ansible.builtin.file:
+    path: /var/log/postgres-backup
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Prepare the protected instance output directory
+  ansible.builtin.file:
+    path: "{{ postgres_backup_restore_schedule_output_file | dirname }}"
+    state: directory
+    owner: root
+    group: "{{ postgres_backup_restore_schedule_group }}"
+    mode: "0750"
+
+- name: Prepare the standard append destination without changing existing content or timestamps
+  ansible.builtin.file:
+    path: "{{ postgres_backup_restore_schedule_output_file }}"
+    state: touch
+    owner: "{{ postgres_backup_restore_schedule_user }}"
+    group: "{{ postgres_backup_restore_schedule_group }}"
+    mode: "0600"
+    access_time: preserve
+    modification_time: preserve
