@@ -1,0 +1,62 @@
+---
+- name: Require an existing single-container rootless deployment
+  ansible.builtin.assert:
+    that:
+      - keycloak_deploy_systemd_scope == 'user'
+      - keycloak_deploy_truststore_sources | length > 0
+      - keycloak_deploy_rootless_uid | int > 0
+
+- name: Read the existing private Keycloak manifest
+  ansible.builtin.slurp:
+    src: "{{ keycloak_deploy_config_dir }}/keycloak-rootless-pod.yml"
+  register: keycloak_deploy_truststore_original
+  no_log: true
+
+- name: Render the desired private manifest in memory
+  ansible.builtin.set_fact:
+    keycloak_deploy_truststore_desired: "{{ lookup('ansible.builtin.template', 'rootless-keycloak-pod.yml.j2') }}"
+  no_log: true
+
+- name: Require an exclusively additive truststore change
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import copy,json,sys
+        import yaml
+        a,b=json.load(sys.stdin)
+        a,b=yaml.safe_load(a),yaml.safe_load(b)
+        def strip(d):
+            d=copy.deepcopy(d)
+            cs=d['spec']['containers']
+            assert len(cs)==1
+            cs[0]['volumeMounts']=[v for v in cs[0]['volumeMounts'] if v['name']!='keycloak-truststores']
+            d['spec']['volumes']=[v for v in d['spec']['volumes'] if v['name']!='keycloak-truststores']
+            return d
+        assert strip(a)==strip(b), 'Non-truststore manifest drift; refusing update'
+    stdin: >-
+      {{ [keycloak_deploy_truststore_original.content | b64decode,
+          keycloak_deploy_truststore_desired] | to_json }}
+  changed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Provision the public CAs before changing the Pod
+  ansible.builtin.include_tasks: rootless-truststores.yml
+
+- name: Save the updated private Keycloak manifest with a recovery copy
+  ansible.builtin.copy:
+    content: "{{ keycloak_deploy_truststore_desired }}"
+    dest: "{{ keycloak_deploy_config_dir }}/keycloak-rootless-pod.yml"
+    mode: '0600'
+    backup: true
+    owner: "{{ keycloak_deploy_rootless_user }}"
+  become: true
+  become_user: root
+  no_log: true
+  diff: false
+
+- name: Reconcile only the Keycloak Quadlet runtime
+  ansible.builtin.include_tasks: rootless-keycloak.yml
+  when: not ansible_check_mode

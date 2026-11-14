@@ -1024,6 +1024,10 @@ roles:
         non-root account, persistent paths, user manager and edge TLS. System-scope
         profile evidence does not establish rootless platform support.
       - >-
+        Optional rootless public CA provisioning and read-only truststore mounts
+        require candidate-specific LDAPS and restart evidence; system-scope
+        profile results do not establish acceptance of this extension.
+      - >-
         Default-off coupled native network migration remains experimental until
         live paired rollback, DNS isolation and restart acceptance pass on the
         exact candidate. Fault-injected unit control-flow tests do not establish

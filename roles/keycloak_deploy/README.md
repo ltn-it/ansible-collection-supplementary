@@ -12,6 +12,28 @@ the operating-system preparation declared by the caller are required.
 
 See `roles/keycloak_deploy/defaults/main.yml`.
 
+The experimental rootless deployment accepts `keycloak_deploy_truststore_sources`,
+a list of absolute controller paths to public `.pem` CA certificates. It copies
+them to `keycloak_deploy_truststore_dir` and mounts this directory read-only at
+`keycloak_deploy_truststore_mount_dir` beneath `/opt/keycloak/conf/truststores/`.
+Keycloak loads this directory at startup. TLS and hostname verification remain
+enabled. Private keys are rejected. An empty list preserves the previous manifest.
+The prepared runtime account needs ownership of the destination directory and
+OpenSSL on the managed host. Podman owns SELinux volume relabeling; do not disable
+SELinux. Removing previously copied CA files is deliberately not automatic.
+
+For an existing rootless installation, the `rootless-truststore-update` task
+entrypoint validates that the rendered manifest differs only by the truststore
+volume and mount before applying it. Root become permission is required for
+the explicitly owned CA and manifest copies. Invoke other tasks as the existing runtime user with
+its user-manager environment and resolved `keycloak_deploy_rootless_uid` and
+`keycloak_deploy_rootless_quadlet_dir`. Existing deployment inputs, including
+encrypted application credentials, must match the active manifest. The entrypoint
+reconciles only Keycloak through `lit.foundational.podman_systemd`; PostgreSQL and
+the proxy are not reconciled. Readiness failure leaves pending restart work and
+requires restoration of the private manifest backup through the same Quadlet.
+This candidate has no general rootless platform or release acceptance claim.
+
 Key variables:
 - `keycloak_deploy_image`
 - `keycloak_deploy_pod_manifest_path`
@@ -223,8 +245,24 @@ Existing rootless networks must match the declared subnet exactly. The role
 inspects that network before writing managed files and rejects a live subnet
 change. A coordinated network migration is outside this experimental path.
 
-The experimental user-scope path requires a canonical IPv4 network with distinct usable static member addresses and rejects nonempty `keycloak_deploy_env_extra`; additional environment settings are not silently ignored.
+The experimental user-scope path requires a canonical IPv4 network with distinct usable static member addresses. `keycloak_deploy_env_extra` supports only explicitly rendered `KC_FEATURES`, `KC_FEATURES_DISABLED`, and canonical `KC_TRUSTSTORE_PATHS` values; protected connection/listener overrides and other names are rejected.
 
 User scope supports the standard `start` command, no extra startup arguments and the root context path. Non-default startup, database vendor/port, container mount paths, host networking or native migration settings are rejected before managed writes. Its derived API URL uses the configured HTTPS hostname; an explicit API URL still takes precedence. System-scope URL derivation is unchanged.
 
 User scope requires the PostgreSQL service name derived from its pod (`<postgres-pod>-pod`). Unsupported `keycloak_deploy_postgres_systemd_unit_name` overrides are rejected before managed writes, preserving the shared lifecycle owner and Keycloak dependencies. Renaming an existing stateful service requires a separate planned transition.
+
+
+### Preserve existing rootless provider and CA bindings
+
+`keycloak_deploy_rootless_providers_dir` optionally mounts an already prepared
+provider directory read-only at `/opt/keycloak/providers`. Declare every JAR in
+`keycloak_deploy_rootless_provider_checksums` as basename to SHA-256. The role
+checks regular single-link payloads and runtime readability; it does not download,
+create, replace, or change ownership of provider code. Feature settings remain
+explicit in `keycloak_deploy_env_extra`; mounting a provider never implicitly
+enables a preview feature.
+
+A full setup refuses to remove or replace existing mounts, extra environment
+bindings, or start arguments. Declare existing bindings before applying it.
+Intentional removal or data migration requires a separately planned transition.
+Default empty inputs preserve the original manifest shape on new installations.

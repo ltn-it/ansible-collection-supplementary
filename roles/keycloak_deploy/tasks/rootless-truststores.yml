@@ -1,0 +1,48 @@
+---
+- name: Validate public CA inputs
+  ansible.builtin.assert:
+    that:
+      - keycloak_deploy_truststore_sources is sequence
+      - keycloak_deploy_truststore_sources is not string
+      - keycloak_deploy_truststore_dir is match('^/[^\r\n]+\Z')
+      - keycloak_deploy_truststore_dir != keycloak_deploy_host_data_dir
+      - keycloak_deploy_truststore_mount_dir is match('^/opt/keycloak/conf/truststores/[A-Za-z0-9_-]+\Z')
+      - >-
+        keycloak_deploy_truststore_sources | map('basename') | unique | length
+        == keycloak_deploy_truststore_sources | length
+    quiet: true
+
+- name: Require public PEM certificates without private keys
+  ansible.builtin.assert:
+    that:
+      - item is match('^/[^\r\n]+[.]pem\Z')
+      - "'-----BEGIN CERTIFICATE-----' in lookup('ansible.builtin.file', item)"
+      - "'PRIVATE KEY' not in lookup('ansible.builtin.file', item)"
+    quiet: true
+  loop: "{{ keycloak_deploy_truststore_sources }}"
+
+- name: Create the additional public CA directory
+  ansible.builtin.file:
+    path: "{{ keycloak_deploy_truststore_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Copy validated public CA certificates
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ keycloak_deploy_truststore_dir }}/{{ item | basename }}"
+    mode: '0644'
+    owner: "{{ keycloak_deploy_rootless_user }}"
+    validate: /usr/bin/openssl x509 -in %s -noout
+  loop: "{{ keycloak_deploy_truststore_sources }}"
+  register: keycloak_deploy_truststore_copy
+  become: true
+  become_user: root
+
+- name: Retain a pending Keycloak restart after CA certificate changes
+  ansible.builtin.file:
+    path: "{{ keycloak_deploy_config_dir }}/.keycloak-last-applied"
+    state: absent
+  when:
+    - keycloak_deploy_truststore_copy is changed
+    - not ansible_check_mode

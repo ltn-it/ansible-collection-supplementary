@@ -1,0 +1,44 @@
+---
+- name: Inspect any existing private Keycloak manifest
+  ansible.builtin.stat:
+    path: "{{ keycloak_deploy_config_dir }}/keycloak-rootless-pod.yml"
+    follow: false
+    get_checksum: false
+    get_mime: false
+  register: keycloak_deploy_existing_bindings_stat
+  no_log: true
+
+- name: Require an existing manifest to be a regular single-link file
+  ansible.builtin.assert:
+    that:
+      - keycloak_deploy_existing_bindings_stat.stat.isreg | default(false)
+      - keycloak_deploy_existing_bindings_stat.stat.nlink | default(0) == 1
+    quiet: true
+  when: keycloak_deploy_existing_bindings_stat.stat.exists
+  no_log: true
+
+- name: Read existing bindings without disclosing private environment values
+  ansible.builtin.slurp:
+    src: "{{ keycloak_deploy_config_dir }}/keycloak-rootless-pod.yml"
+  register: keycloak_deploy_existing_bindings
+  when: keycloak_deploy_existing_bindings_stat.stat.exists
+  no_log: true
+
+- name: Compare declared bindings before changing the running deployment
+  ansible.builtin.set_fact:
+    keycloak_deploy_bindings_preserved: >-
+      {{ (keycloak_deploy_existing_bindings.content | b64decode)
+         | lit.supplementary.rootless_keycloak_bindings_preserved(
+             lookup('ansible.builtin.template', 'rootless-keycloak-pod.yml.j2')) }}
+  when: keycloak_deploy_existing_bindings_stat.stat.exists
+  no_log: true
+
+- name: Refuse removal or replacement of undeclared existing bindings
+  ansible.builtin.assert:
+    that: keycloak_deploy_bindings_preserved | bool
+    fail_msg: >-
+      ROOTLESS_BINDING_CHANGE_BLOCKED: declare the existing provider, public CA,
+      environment and start bindings before a full setup. Plan intentional
+      binding removal or migration separately; the existing manifest is preserved.
+    quiet: true
+  when: keycloak_deploy_existing_bindings_stat.stat.exists

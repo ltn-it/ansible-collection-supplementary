@@ -21,7 +21,7 @@ class RootlessEdgeTemplates(unittest.TestCase):
         environment.filters["bool"] = lambda value: str(value).lower() in {"true", "yes", "on", "1"}
         return environment.from_string(source).render(**values)
 
-    def keycloak(self, enabled, port=19000):
+    def keycloak(self, enabled, port=19000, ca_sources=None, env_extra=None, providers_dir=""):
         return yaml.safe_load(
             self.render(
                 "keycloak_deploy",
@@ -34,6 +34,11 @@ class RootlessEdgeTemplates(unittest.TestCase):
                 keycloak_deploy_management_port=port,
                 keycloak_deploy_rootless_publish_management=enabled,
                 keycloak_deploy_host_data_dir="/srv/data",
+                keycloak_deploy_truststore_sources=ca_sources or [],
+                keycloak_deploy_env_extra=env_extra or {},
+                keycloak_deploy_rootless_providers_dir=providers_dir,
+                keycloak_deploy_truststore_dir="/srv/truststores",
+                keycloak_deploy_truststore_mount_dir="/opt/keycloak/conf/truststores/additional",
                 keycloak_deploy_rootless_postgres_ip="10.89.50.20",
                 keycloak_deploy_db_name="keycloak",
                 keycloak_deploy_db_user="keycloak",
@@ -57,6 +62,41 @@ class RootlessEdgeTemplates(unittest.TestCase):
         self.assertNotIn("ports", self.keycloak("false")["spec"]["containers"][0])
         self.assertIn("ports", self.keycloak("true")["spec"]["containers"][0])
         self.assertEqual(self.keycloak(True, 9000)["spec"]["containers"][0]["ports"][0]["hostPort"], 9000)
+
+    def test_additional_ca_mount_is_read_only_and_data_stays_writable(self):
+        manifest = self.keycloak(True, ca_sources=["/controller/root.pem", "/controller/intermediate.pem"])
+        mounts = manifest["spec"]["containers"][0]["volumeMounts"]
+        self.assertEqual(mounts[0], {"name": "keycloak-data", "mountPath": "/opt/keycloak/data"})
+        self.assertEqual(
+            mounts[1],
+            {
+                "name": "keycloak-truststores",
+                "mountPath": "/opt/keycloak/conf/truststores/additional",
+                "readOnly": True,
+            },
+        )
+        self.assertEqual(
+            manifest["spec"]["volumes"][1],
+            {"name": "keycloak-truststores", "hostPath": {"path": "/srv/truststores", "type": "Directory"}},
+        )
+        self.assertEqual(len(self.keycloak(True)["spec"]["volumes"]), 1)
+
+    def test_prepared_providers_and_explicit_features_retain_the_existing_bindings(self):
+        manifest = self.keycloak(True, env_extra={"KC_FEATURES": "scripts"}, providers_dir="/srv/providers")
+        app = manifest["spec"]["containers"][0]
+        self.assertEqual(app["env"][0], {"name": "KC_FEATURES", "value": "scripts"})
+        self.assertEqual(
+            app["volumeMounts"][0],
+            {
+                "name": "keycloak-script-providers",
+                "mountPath": "/opt/keycloak/providers",
+                "readOnly": True,
+            },
+        )
+        self.assertEqual(manifest["spec"]["volumes"][0]["hostPath"], {"path": "/srv/providers", "type": "Directory"})
+        default = self.keycloak(True)
+        self.assertEqual(len(default["spec"]["volumes"]), 1)
+        self.assertNotIn("KC_FEATURES", {entry["name"] for entry in default["spec"]["containers"][0]["env"]})
 
     def test_postgres_has_no_host_listener(self):
         manifest = yaml.safe_load(
