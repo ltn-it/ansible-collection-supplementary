@@ -39,6 +39,7 @@
           else 'restarted' }}
     podman_systemd_unit_name: "{{ keycloak_deploy_systemd_unit_name }}"
     podman_systemd_description: "Rootless keycloak"
+    podman_systemd_log_path: "{{ keycloak_deploy_log_path }}"
     podman_systemd_manifest_path: "{{ keycloak_deploy_config_dir }}/keycloak-rootless-pod.yml"
     podman_systemd_scope: user
     podman_systemd_quadlet_dir: "{{ keycloak_deploy_rootless_quadlet_dir }}"
@@ -84,6 +85,31 @@
   retries: 60
   delay: 5
   when: not keycloak_deploy_rootless_publish_management | bool
+
+- name: Verify the running native log destination rather than accepting an unsupported controller
+  ansible.builtin.command:
+    argv:
+      - podman
+      - inspect
+      - --type
+      - container
+      - --format
+      - "{{ '{{json .HostConfig.LogConfig}}' }}"
+      - "{{ keycloak_deploy_pod_name }}-{{ keycloak_deploy_container_name }}"
+  register: keycloak_deploy_log_path_actual
+  changed_when: false
+  when: keycloak_deploy_log_path | length > 0
+  no_log: true
+
+- name: Require the selected native path and k8s-file driver to be effective
+  ansible.builtin.assert:
+    that:
+      - (keycloak_deploy_log_path_actual.stdout | from_json).Path == keycloak_deploy_log_path
+      - (keycloak_deploy_log_path_actual.stdout | from_json).Type == 'k8s-file'
+    fail_msg: The installed shared kube controller must support the configured native log destination.
+    quiet: true
+  when: keycloak_deploy_log_path | length > 0
+  no_log: true
 
 - name: Record the successfully applied keycloak identity
   ansible.builtin.copy:

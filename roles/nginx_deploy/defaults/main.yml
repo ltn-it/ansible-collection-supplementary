@@ -109,3 +109,5 @@ nginx_deploy_rootless_tls_key: ""
 nginx_deploy_rootless_after:
   - network-online.target
   - keycloak-pod.service
+# Optional prepared native file; empty preserves Podman's logging defaults.
+nginx_deploy_log_path: ""

@@ -147,6 +147,17 @@ Existing system-scope platform/profile claims do not establish rootless producti
 support. Rootless remains experimental; the caller owns PKI, trust and backup/
 restore planning. Container names follow Podman's kube pod/container naming.
 
+For experimental user scope, `keycloak_deploy_log_path` and
+`keycloak_deploy_postgres_log_path` optionally select prepared native log
+files. Empty values preserve Podman's logging defaults. Each file and its
+private parent directory must already exist and be writable by the runtime
+account. This requires a shared `podman_systemd` implementation supporting
+`podman_systemd_log_path`; the role verifies the actual running driver and
+path before recording success, so an older controller cannot silently ignore
+the setting. A destination change restarts the affected pod through its native
+unit. Existing log history is not migrated automatically; plan its retention
+before replacing an existing pod. Configure operating-system rotation separately.
+
 ## Dependencies
 
 Runtime composition uses `lit.supplementary.postgres_deploy` when PostgreSQL is
