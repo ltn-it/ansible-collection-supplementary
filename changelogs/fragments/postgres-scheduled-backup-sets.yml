@@ -6,7 +6,3 @@ minor_changes:
     vendor-neutral shared worker and instance-specific configuration paths, archive and checksum validation,
     conservative scheduled-set retention,
     manual restore-point preservation and a read-only status/verification CLI.
-  - >-
-    postgres_backup_restore - optionally route scheduled worker diagnostics through
-    an existing bounded component-log policy, validating runtime identity and
-    separation from backup/transaction data without changing shared worker bytes.

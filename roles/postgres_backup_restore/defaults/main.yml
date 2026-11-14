@@ -66,9 +66,8 @@ postgres_backup_restore_schedule_python_binary: /usr/bin/python3
 postgres_backup_restore_schedule_unit: "postgres-backup-{{ postgres_backup_restore_schedule_instance }}"
 # One host-wide implementation can serve multiple instance-specific configurations.
 postgres_backup_restore_schedule_worker: /usr/local/libexec/postgres-backup.py
-# Optional existing shared component-log policy; no helper installation or trust changes here.
+# Retired experimental input: only empty is accepted; no external log helper is invoked.
 postgres_backup_restore_schedule_log_config: ""
-postgres_backup_restore_schedule_log_worker: /usr/local/libexec/podman-component-logs/main.py
 postgres_backup_restore_schedule_config: >-
   /etc/postgres-backup/{{ postgres_backup_restore_schedule_instance }}.json
 postgres_backup_restore_schedule_unit_dir: "{{ postgres_backup_restore_schedule_home }}/.config/systemd/user"

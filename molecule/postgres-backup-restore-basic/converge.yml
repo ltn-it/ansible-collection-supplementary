@@ -1,0 +1,87 @@
+---
+- name: Validate and render the packaged backup scheduler without a database or systemd deployment
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    postgres_backup_restore_test_root: >-
+      {{ lookup('ansible.builtin.env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/scheduler
+    postgres_backup_restore_test_role: >-
+      {{ lookup('ansible.builtin.env', 'ANSIBLE_COLLECTIONS_PATH').split(':')[0]
+         }}/ansible_collections/lit/supplementary/roles/postgres_backup_restore
+    postgres_backup_restore_action: schedule
+    postgres_backup_restore_execute: true
+    postgres_backup_restore_execution_mode: podman
+    postgres_backup_restore_db_name: fixture
+    postgres_backup_restore_db_user: fixture
+    postgres_backup_restore_db_password: ""
+    postgres_backup_restore_container_name: fixture-postgres
+    postgres_backup_restore_backup_dir: "{{ postgres_backup_restore_test_root }}/backups"
+    postgres_backup_restore_schedule_instance: fixture
+    postgres_backup_restore_schedule_user: fixture
+    postgres_backup_restore_schedule_group: fixture
+    postgres_backup_restore_schedule_uid: "{{ postgres_backup_restore_test_identity.stdout | int }}"
+    postgres_backup_restore_schedule_home: "{{ postgres_backup_restore_test_root }}"
+    postgres_backup_restore_schedule_pgdata_dir: "{{ postgres_backup_restore_test_root }}/data"
+    postgres_backup_restore_schedule_image: "registry.invalid/postgres@sha256:{{ '1' * 64 }}"
+    postgres_backup_restore_schedule_source_revision: "{{ '1' * 40 }}"
+  tasks:
+    - name: Read the actual controller UID for the private file fixture
+      ansible.builtin.command: /usr/bin/id -u
+      register: postgres_backup_restore_test_identity
+      changed_when: false
+
+    - name: Validate actual installed role inputs
+      ansible.builtin.include_role:
+        name: lit.supplementary.postgres_backup_restore
+        tasks_from: assert
+        public: true
+
+    - name: Create a private controller rendering fixture
+      ansible.builtin.file:
+        path: "{{ postgres_backup_restore_test_root }}"
+        state: directory
+        mode: "0700"
+
+    - name: Render installed configuration and service templates
+      ansible.builtin.template:
+        src: "{{ postgres_backup_restore_test_role }}/templates/{{ postgres_backup_restore_test_template }}.j2"
+        dest: "{{ postgres_backup_restore_test_root }}/{{ postgres_backup_restore_test_template }}"
+        mode: "0600"
+      loop: [scheduled-backup.json, scheduled-backup.service]
+      loop_control:
+        loop_var: postgres_backup_restore_test_template
+
+    - name: Validate the fixture through the installed worker without running a backup
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - -B
+          - "{{ postgres_backup_restore_test_role }}/files/scheduled_backup.py"
+          - --config
+          - "{{ postgres_backup_restore_test_root }}/scheduled-backup.json"
+          - --validate
+      changed_when: false
+
+    - name: Attempt the retired capture input
+      block:
+        - name: Require the role to reject a legacy policy
+          ansible.builtin.include_role:
+            name: lit.supplementary.postgres_backup_restore
+            tasks_from: assert
+          vars:
+            postgres_backup_restore_schedule_log_config: /etc/legacy-policy.json
+
+        - name: Record unexpected legacy acceptance
+          ansible.builtin.set_fact:
+            postgres_backup_restore_test_legacy_accepted: true
+      rescue:
+        - name: Record expected legacy rejection
+          ansible.builtin.set_fact:
+            postgres_backup_restore_test_legacy_rejected: true
+
+    - name: Require actual legacy rejection
+      ansible.builtin.assert:
+        that:
+          - postgres_backup_restore_test_legacy_rejected | default(false)
+          - not postgres_backup_restore_test_legacy_accepted | default(false)

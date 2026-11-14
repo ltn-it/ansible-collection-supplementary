@@ -126,20 +126,11 @@
     - postgres_backup_restore_schedule_state == 'present'
   tags: always
 
-- name: Validate optional scheduled backup log capture inputs
+- name: Reject retired custom scheduled backup log capture
   ansible.builtin.assert:
     that:
-      - postgres_backup_restore_schedule_log_config is string
-      - postgres_backup_restore_schedule_log_worker is string
-      - >-
-        postgres_backup_restore_schedule_log_config == '' or
-        postgres_backup_restore_schedule_log_config is
-        match('^/etc/podman-component-logs/[A-Za-z0-9][A-Za-z0-9_.-]*\.json$')
-      - >-
-        postgres_backup_restore_schedule_log_config == '' or
-        postgres_backup_restore_schedule_log_worker is
-        match('^/usr/local/libexec/[A-Za-z0-9_-]+/main\.py$')
-    fail_msg: Log capture requires an existing instance policy and shared component-log entry point.
+      - postgres_backup_restore_schedule_log_config == ''
+    fail_msg: Custom log capture is retired; use the direct backup worker and operating system logging.
     quiet: true
   when:
     - postgres_backup_restore_action == 'schedule'

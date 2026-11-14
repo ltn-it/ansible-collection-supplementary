@@ -58,26 +58,16 @@ and `container_name` inputs. All scheduling inputs have the full
 - `after`: optional service ordering; never starts a stopped database.
 - `enabled`: schedule enable gate, default `false`.
 - `state`: `present` or `absent`; removal preserves all backup sets.
-- `log_config`: optional existing `/etc/podman-component-logs/<component>.json`
-  policy. Empty by default. When supplied, the scheduled service captures its
-  operational stdout/stderr into that component's bounded operational log.
-- `log_worker`: existing shared component-log entry point, default
-  `/usr/local/libexec/podman-component-logs/main.py`. The backup worker and its
-  instance-specific settings remain separate and unchanged.
+- `log_config`: retired experimental input; must remain empty. Nonempty values
+  are rejected before configuring a schedule.
 
-The optional log policy must already be installed and validated by its owning
-automation, for example `lit.rhel.podman_log_config`. This role verifies protected
-root-owned regular helper/config files, matching runtime UID and database
-container, operational capture enabled and log paths disjoint from both database
-data and backups. It does not install or trust a log helper. Native log size,
-rotation, archive count/age/bytes and the collector's persistent service are the
-policy producer's responsibility. The backup service explicitly uses
-`KillMode=control-group` so deactivation also contains worker descendants. A log
-capture error fails the service instead of silently running an unlogged backup.
-The same command with `--capture` can wrap an authorized fixed-marker restore
-worker; enabling this schedule input does not alter independent manual restore
-procedures or prove their operational logging. Never route a database dump stream
-or restored SQL into the operational log.
+The scheduled service invokes the existing shared worker directly. It neither
+installs nor invokes a component-log helper. Standard output/error currently
+use the system journal. Component-wide RPM retention and backup/restore
+operational-file integration remain separate consumer integration requirements;
+the journal setting does not prove those limits. `KillMode=control-group`
+contains worker descendants when stopping the service. Never route a database
+dump stream or restored SQL into an operational log.
 
 Scheduled sets contain the entire selected database, role definitions **without
 passwords**, an immutable manifest and SHA-256 checksums. Role definitions are
