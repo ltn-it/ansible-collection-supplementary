@@ -1,5 +1,9 @@
 ---
 bugfixes:
-  - keycloak_deploy - refuse silent loss of existing rootless provider, CA, environment, and start bindings during full setup.
+  - >-
+    keycloak_deploy - refuse silent loss of existing rootless provider, CA,
+    environment, and start bindings during full setup.
 minor_changes:
-  - keycloak_deploy - verify prepared provider JAR checksums and mount read-only; render validated public feature and trust settings explicitly.
+  - >-
+    keycloak_deploy - verify prepared provider JAR checksums and mount read-only;
+    render validated public feature and trust settings explicitly.
