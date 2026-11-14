@@ -212,6 +212,20 @@ class KeycloakBrokerCatalogTests(unittest.TestCase):
         self.assertLess(tasks.index("cac_17_authentication_flows.yml"), tasks.index("cac_18_identity_providers.yml"))
         self.assertLess(tasks.index("cac_18_identity_providers.yml"), tasks.index("cac_19_required_actions.yml"))
         self.assertLess(tasks.index("cac_19_required_actions.yml"), tasks.index("cac_21_realm_flow_bindings.yml"))
+        realm_tasks = yaml.safe_load((ROLE / "tasks/cac_11_realms.yml").read_text())
+        self.assertEqual(len(realm_tasks), 1)
+        realm_task = realm_tasks[0]
+        self.assertEqual(realm_task["name"], "Reconcile Keycloak realms")
+        self.assertNotIn("check_mode", realm_task)
+        self.assertNotIn("register", realm_task)
+        self.assertNotIn("changed_when", realm_task)
+        self.assertEqual(
+            realm_task["loop"],
+            "{{ keycloak_cac_realm_reconciliation_catalog | default(keycloak_cac_realms) }}",
+        )
+        readme = (ROLE / "README.md").read_text()
+        self.assertIn("reusing direct realm\nreconciliation", readme)
+        self.assertNotIn("plan/reconciliation path", readme)
         binding = yaml.safe_load((ROLE / "tasks/cac_21_realm_flow_bindings.yml").read_text())[0]
         self.assertEqual(binding["ansible.builtin.include_tasks"], "cac_11_realms.yml")
         self.assertEqual(

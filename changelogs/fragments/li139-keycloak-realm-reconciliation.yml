@@ -1,0 +1,5 @@
+---
+bugfixes:
+  - >-
+    Reconcile Keycloak realms directly through the idempotent module before
+    dependent clients instead of relying on a detached check-mode result.
