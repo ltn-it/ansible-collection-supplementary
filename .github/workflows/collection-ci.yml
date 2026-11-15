@@ -35,7 +35,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  G06_VALIDATION_CONTROLLER_SHA: a94f4234ee6d14308e341d1c9d0d9ce9d2277e3a
+  G06_VALIDATION_CONTROLLER_SHA: a94199c94fd00226e194613d0fb9d52705baa808
   PYTHON_VERSION: "3.11"
   ANSIBLE_CORE_VERSION: "2.18.18"
   COLLECTION_NAMESPACE: lit
@@ -819,7 +819,7 @@ jobs:
       actions: read
       checks: read
       id-token: write
-    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@a94f4234ee6d14308e341d1c9d0d9ce9d2277e3a
+    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@a94199c94fd00226e194613d0fb9d52705baa808
     with:
       profile: heavy
       matrix-json: ${{ needs.quality-matrix.outputs.heavy }}
@@ -867,7 +867,7 @@ jobs:
       actions: read
       checks: read
       id-token: write
-    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@a94f4234ee6d14308e341d1c9d0d9ce9d2277e3a
+    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@a94199c94fd00226e194613d0fb9d52705baa808
     with:
       profile: application_acceptance
       matrix-json: ${{ needs.quality-matrix.outputs.acceptance }}
@@ -900,8 +900,8 @@ jobs:
 
   g06-operating-failure:
     name: G06 operating failure
-    # Retain both failed deliveries and the exact protocol follow-up. Root binds
-    # exact native continuity; this caller condition grants no authority.
+    # Retain every recorded predecessor, including the failed-with-effects
+    # 8926 execution. Root independently proves cleanup, custody and continuity.
     if: >-
       github.repository == 'ltn-it/ansible-collection-supplementary' &&
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
@@ -909,7 +909,8 @@ jobs:
        github.event.before == '14e3abd5d1fa0cfad14d52ec83483b761de207f0' ||
        github.event.before == 'f27c1d4edff75377f285275cec9bfec6bc3081f6' ||
        github.event.before == '3d84e26d90cc778fb8c4f462ce481584da57fb5a' ||
-       github.event.before == 'f138a227d9eee41ea698b1a6f3b9a05f7ae3e18d') &&
+       github.event.before == 'f138a227d9eee41ea698b1a6f3b9a05f7ae3e18d' ||
+       github.event.before == '8926e7f535f158d4af89e4ac68149ff0b8ab740d') &&
       github.run_attempt == 1 &&
       ((github.actor == 'litroc' && github.actor_id == '76040632') ||
        (github.actor == 'litdeg' && github.actor_id == '247824904')) &&
@@ -920,7 +921,7 @@ jobs:
       actions: read
       checks: read
       id-token: write
-    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@a94f4234ee6d14308e341d1c9d0d9ce9d2277e3a
+    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@a94199c94fd00226e194613d0fb9d52705baa808
     with:
       profile: operating
       operating-case: failure
@@ -930,8 +931,8 @@ jobs:
 
   g06-operating-broker-cancel:
     name: G06 operating broker cancel
-    # Retain both failed deliveries and the exact protocol follow-up. Root binds
-    # exact native continuity; this caller condition grants no authority.
+    # Retain every recorded predecessor, including the failed-with-effects
+    # 8926 execution. Root independently proves cleanup, custody and continuity.
     if: >-
       github.repository == 'ltn-it/ansible-collection-supplementary' &&
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
@@ -939,7 +940,8 @@ jobs:
        github.event.before == '14e3abd5d1fa0cfad14d52ec83483b761de207f0' ||
        github.event.before == 'f27c1d4edff75377f285275cec9bfec6bc3081f6' ||
        github.event.before == '3d84e26d90cc778fb8c4f462ce481584da57fb5a' ||
-       github.event.before == 'f138a227d9eee41ea698b1a6f3b9a05f7ae3e18d') &&
+       github.event.before == 'f138a227d9eee41ea698b1a6f3b9a05f7ae3e18d' ||
+       github.event.before == '8926e7f535f158d4af89e4ac68149ff0b8ab740d') &&
       github.run_attempt == 1 &&
       ((github.actor == 'litroc' && github.actor_id == '76040632') ||
        (github.actor == 'litdeg' && github.actor_id == '247824904')) &&
@@ -950,7 +952,7 @@ jobs:
       actions: read
       checks: read
       id-token: write
-    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@a94f4234ee6d14308e341d1c9d0d9ce9d2277e3a
+    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@a94199c94fd00226e194613d0fb9d52705baa808
     with:
       profile: operating
       operating-case: broker-cancel
@@ -960,8 +962,8 @@ jobs:
 
   g06-operating-expiry-controller-loss:
     name: G06 operating expiry
-    # Retain both failed deliveries and the exact protocol follow-up. Root binds
-    # exact native continuity; this caller condition grants no authority.
+    # Retain every recorded predecessor, including the failed-with-effects
+    # 8926 execution. Root independently proves cleanup, custody and continuity.
     if: >-
       github.repository == 'ltn-it/ansible-collection-supplementary' &&
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
@@ -969,7 +971,8 @@ jobs:
        github.event.before == '14e3abd5d1fa0cfad14d52ec83483b761de207f0' ||
        github.event.before == 'f27c1d4edff75377f285275cec9bfec6bc3081f6' ||
        github.event.before == '3d84e26d90cc778fb8c4f462ce481584da57fb5a' ||
-       github.event.before == 'f138a227d9eee41ea698b1a6f3b9a05f7ae3e18d') &&
+       github.event.before == 'f138a227d9eee41ea698b1a6f3b9a05f7ae3e18d' ||
+       github.event.before == '8926e7f535f158d4af89e4ac68149ff0b8ab740d') &&
       github.run_attempt == 1 &&
       ((github.actor == 'litroc' && github.actor_id == '76040632') ||
        (github.actor == 'litdeg' && github.actor_id == '247824904')) &&
@@ -980,7 +983,7 @@ jobs:
       actions: read
       checks: read
       id-token: write
-    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@a94f4234ee6d14308e341d1c9d0d9ce9d2277e3a
+    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@a94199c94fd00226e194613d0fb9d52705baa808
     with:
       profile: operating
       operating-case: expiry-controller-loss
