@@ -132,7 +132,7 @@ class TruststoreRecovery(unittest.TestCase):
             with self.subTest(variant=variant):
                 self.guard_case(variant)
 
-    def copy_case(self, partial_failure):
+    def copy_case(self, partial_failure, link_variant=None):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "sources"
@@ -185,6 +185,32 @@ class TruststoreRecovery(unittest.TestCase):
                 keycloak_deploy_config_dir=str(configuration),
             )
             tasks = yaml.safe_load((ROLE / "tasks/rootless-truststores.yml").read_text())
+            if link_variant:
+                outside = root / "unrelated"
+                outside.mkdir(mode=0o755)
+                sentinel = outside / certificate.name
+                sentinel.write_bytes(b"UNRELATED_SENTINEL")
+                before = (sentinel.read_bytes(), sentinel.stat(), outside.stat())
+                selected = destination / certificate.name
+                if link_variant == "directory":
+                    destination.rename(root / "retained")
+                    destination.symlink_to(outside, target_is_directory=True)
+                elif link_variant == "ancestor":
+                    parent = root / "linked-parent"
+                    parent.symlink_to(root, target_is_directory=True)
+                    variables["keycloak_deploy_truststore_dir"] = str(parent / destination.name)
+                elif link_variant == "file":
+                    selected.unlink()
+                    selected.symlink_to(sentinel)
+                else:
+                    selected.unlink()
+                    os.link(sentinel, selected)
+                    before = (sentinel.read_bytes(), sentinel.stat(), outside.stat())
+                output = self.run_play(root, tasks, variables, 2)
+                self.assertIn("ROOTLESS_CA_LINKED_PATH", output)
+                self.assertEqual(before, (sentinel.read_bytes(), sentinel.stat(), outside.stat()))
+                self.assertEqual(marker.read_text(), "APPLIED\n")
+                return
             self.run_play(root, tasks, variables, 2 if partial_failure else 0)
             self.assertEqual((destination / certificate.name).read_bytes(), certificate.read_bytes())
             self.assertEqual(preserved.read_bytes(), certificate.read_bytes())
@@ -199,3 +225,8 @@ class TruststoreRecovery(unittest.TestCase):
 
     def test_unchanged_successful_ca_copies_preserve_applied_marker(self):
         self.copy_case(False)
+
+    def test_linked_ca_destinations_fail_before_modifying_unrelated_files(self):
+        for variant in ("directory", "ancestor", "file", "hardlink"):
+            with self.subTest(variant=variant):
+                self.copy_case(False, variant)

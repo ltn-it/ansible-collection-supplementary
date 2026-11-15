@@ -30,8 +30,10 @@ not. YAML comparison runs privately on the Ansible controller and does not
 require PyYAML on the managed host. A changed or failed CA copy invalidates the
 applied-state marker even if only an earlier copy succeeded. The next successful
 retry retains that pending restart until reconciliation. Unchanged successful
-copies preserve the marker. Root become permission is required for
-the explicitly owned CA and manifest copies. Invoke other tasks as the existing runtime user with
+copies preserve the marker. CA directories, certificate copies and manifest
+updates run as the existing runtime account. Linked destination ancestors,
+symlinked files and multiply linked files are rejected before copying; certificate
+copying never escalates to root. Invoke other tasks as the existing runtime user with
 its user-manager environment and resolved `keycloak_deploy_rootless_uid` and
 `keycloak_deploy_rootless_quadlet_dir`. Existing deployment inputs, including
 encrypted application credentials, must match the active manifest. The entrypoint
@@ -267,6 +269,12 @@ checks regular single-link payloads and runtime readability; it does not downloa
 create, replace, or change ownership of provider code. Feature settings remain
 explicit in `keycloak_deploy_env_extra`; mounting a provider never implicitly
 enables a preview feature.
+
+The sorted, validated provider checksums also bind a Pod annotation. Changing a
+provider's declared content therefore changes the desired manifest and follows
+the normal pending-generation restart/readiness path. An unchanged or reordered
+checksum mapping does not cause a restart. A changed JAR with an old declared
+checksum fails validation before deployment.
 
 A full setup refuses to remove or replace existing mounts, extra environment
 bindings, or start arguments. Declare existing bindings before applying it.

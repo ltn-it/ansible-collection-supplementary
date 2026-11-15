@@ -5,6 +5,9 @@ metadata:
   annotations:
     io.podman.annotations.userns: >-
       keep-id:uid={{ keycloak_deploy_run_user_uid }},gid={{ keycloak_deploy_run_user_gid }}
+{% if keycloak_deploy_rootless_providers_dir | length > 0 %}
+    io.lightningit.keycloak.provider-sha256: {{ (keycloak_deploy_rootless_provider_checksums | to_json(sort_keys=true) | hash('sha256')) | to_json }}
+{% endif %}
 spec:
   containers:
     - name: {{ keycloak_deploy_container_name | to_json }}

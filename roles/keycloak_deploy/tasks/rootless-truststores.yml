@@ -21,11 +21,34 @@
     quiet: true
   loop: "{{ keycloak_deploy_truststore_sources }}"
 
+- name: Reject linked public CA destinations before preparing or copying files
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_facts.get('python', {}).get('executable', '/usr/bin/python3') }}"
+      - -c
+      - |
+        import json,pathlib,stat,sys
+        directory=pathlib.Path(sys.argv[1])
+        assert not any(p.is_symlink() for p in (directory,*directory.parents)), 'ROOTLESS_CA_LINKED_PATH'
+        for name in json.loads(sys.argv[2]):
+            p=directory/name
+            if p.is_symlink():
+                raise ValueError('ROOTLESS_CA_LINKED_PATH')
+            if p.exists():
+                s=p.stat()
+                assert stat.S_ISREG(s.st_mode) and s.st_nlink==1, 'ROOTLESS_CA_LINKED_PATH'
+      - "{{ keycloak_deploy_truststore_dir }}"
+      - "{{ keycloak_deploy_truststore_sources | map('basename') | list | to_json }}"
+  changed_when: false
+  check_mode: false
+
 - name: Create the additional public CA directory
   ansible.builtin.file:
     path: "{{ keycloak_deploy_truststore_dir }}"
     state: directory
     mode: '0755'
+  become: true
+  become_user: "{{ keycloak_deploy_rootless_user }}"
 
 - name: Retain pending reconciliation even after a partial public CA copy failure
   block:
@@ -35,11 +58,12 @@
         dest: "{{ keycloak_deploy_truststore_dir }}/{{ item | basename }}"
         mode: '0644'
         owner: "{{ keycloak_deploy_rootless_user }}"
+        follow: false
         validate: /usr/bin/openssl x509 -in %s -noout
       loop: "{{ keycloak_deploy_truststore_sources }}"
       register: keycloak_deploy_truststore_copy
       become: true
-      become_user: root
+      become_user: "{{ keycloak_deploy_rootless_user }}"
   always:
     - name: Retain a pending Keycloak restart after CA changes or an uncertain copy
       ansible.builtin.file:

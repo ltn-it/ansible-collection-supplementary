@@ -1,0 +1,6 @@
+---
+bugfixes:
+  - keycloak_deploy - reject linked public CA destinations and copy CAs and updated manifests
+    as the runtime account instead of root.
+  - keycloak_deploy - bind validated provider checksums to the Pod generation so changed provider content
+    requires successful restart and readiness.

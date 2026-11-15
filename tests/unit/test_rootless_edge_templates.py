@@ -1,5 +1,6 @@
 """Rootless kube manifests retain listener and proxy security boundaries."""
 
+import hashlib
 import json
 import unittest
 from pathlib import Path
@@ -18,10 +19,11 @@ class RootlessEdgeTemplates(unittest.TestCase):
             autoescape=select_autoescape(default=False, default_for_string=False),
         )
         environment.filters["to_json"] = json.dumps
+        environment.filters["hash"] = lambda value, algorithm: hashlib.new(algorithm, value.encode()).hexdigest()
         environment.filters["bool"] = lambda value: str(value).lower() in {"true", "yes", "on", "1"}
         return environment.from_string(source).render(**values)
 
-    def keycloak(self, enabled, port=19000, ca_sources=None, env_extra=None, providers_dir=""):
+    def keycloak(self, enabled, port=19000, ca_sources=None, env_extra=None, providers_dir="", provider_checksums=None):
         return yaml.safe_load(
             self.render(
                 "keycloak_deploy",
@@ -37,6 +39,7 @@ class RootlessEdgeTemplates(unittest.TestCase):
                 keycloak_deploy_truststore_sources=ca_sources or [],
                 keycloak_deploy_env_extra=env_extra or {},
                 keycloak_deploy_rootless_providers_dir=providers_dir,
+                keycloak_deploy_rootless_provider_checksums=provider_checksums or {},
                 keycloak_deploy_truststore_dir="/srv/truststores",
                 keycloak_deploy_truststore_mount_dir="/opt/keycloak/conf/truststores/additional",
                 keycloak_deploy_rootless_postgres_ip="10.89.50.20",
@@ -97,6 +100,23 @@ class RootlessEdgeTemplates(unittest.TestCase):
         default = self.keycloak(True)
         self.assertEqual(len(default["spec"]["volumes"]), 1)
         self.assertNotIn("KC_FEATURES", {entry["name"] for entry in default["spec"]["containers"][0]["env"]})
+
+    def test_provider_content_identity_changes_the_generation_without_reordering_drift(self):
+        values = {"first.jar": "a" * 64, "second.jar": "b" * 64}
+        first = self.keycloak(True, providers_dir="/srv/providers", provider_checksums=values)
+        reordered = self.keycloak(
+            True, providers_dir="/srv/providers", provider_checksums=dict(reversed(values.items()))
+        )
+        self.assertEqual(first, reordered)
+        updated = self.keycloak(
+            True, providers_dir="/srv/providers", provider_checksums=values | {"first.jar": "c" * 64}
+        )
+        self.assertNotEqual(first, updated)
+        annotation = "io.lightningit.keycloak.provider-sha256"
+        self.assertNotEqual(
+            first["metadata"]["annotations"][annotation], updated["metadata"]["annotations"][annotation]
+        )
+        self.assertNotIn(annotation, self.keycloak(True)["metadata"]["annotations"])
 
     def test_postgres_has_no_host_listener(self):
         manifest = yaml.safe_load(
