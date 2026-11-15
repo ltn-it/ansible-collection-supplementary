@@ -14,7 +14,7 @@ ROLE = Path(__file__).resolve().parents[2] / "roles/postgres_backup_restore"
 
 
 class OperationalOutputTests(unittest.TestCase):
-    def execute(self, action, mode, fmt, rc=0, restore_args=None):
+    def execute(self, action, mode, fmt, rc=0, restore_args=None, hardlink=False):
         nonce = secrets.token_hex(16)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -25,6 +25,12 @@ class OperationalOutputTests(unittest.TestCase):
             source = root / "source.dump"
             source.write_text("fixture-source")
             backup = root / "new.dump"
+            outside = root / "outside.dump"
+            if hardlink:
+                outside.write_text("previous-protected-data")
+                outside.chmod(0o644)
+                os.link(outside, backup)
+                original_inode = outside.stat().st_ino
             fixture = f"""#!/bin/sh
 [ "$PGPASSWORD" = "{nonce}" ] || exit 99
 case "$0" in
@@ -123,9 +129,22 @@ exec "$@"
             self.assertIn("private-diagnostic-fixture", contents)
             self.assertEqual(log.stat().st_mode & 0o777, 0o600)
             if action == "backup":
-                self.assertEqual(backup.read_text(), "fixture-dump")
                 self.assertNotIn("fixture-dump", contents)
-                self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(list(root.glob(".lit-postgres-dump.*")), [])
+                if rc == 0:
+                    self.assertEqual(backup.read_text(), "fixture-dump")
+                    self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
+                    if hardlink:
+                        self.assertNotEqual(backup.stat().st_ino, original_inode)
+                elif hardlink:
+                    self.assertEqual(backup.read_text(), "previous-protected-data")
+                    self.assertEqual(backup.stat().st_ino, original_inode)
+                else:
+                    self.assertFalse(backup.exists())
+                if hardlink:
+                    self.assertEqual(outside.read_text(), "previous-protected-data")
+                    self.assertEqual(outside.stat().st_ino, original_inode)
+                    self.assertEqual(outside.stat().st_mode & 0o777, 0o644)
             else:
                 self.assertIn("fixture-restored", contents)
                 self.assertEqual(source.read_text(), "fixture-source")
@@ -144,3 +163,9 @@ exec "$@"
 
     def test_parallel_client_restore_keeps_a_regular_named_archive(self):
         self.execute("restore", "client", "custom", restore_args=["--jobs=4"])
+
+    def test_backup_atomically_replaces_hardlinks_and_preserves_old_data_on_failure(self):
+        for mode in ("client", "podman"):
+            for rc in (0, 7):
+                with self.subTest(mode=mode, rc=rc):
+                    self.execute("backup", mode, "custom", rc=rc, hardlink=True)

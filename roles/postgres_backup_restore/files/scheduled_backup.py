@@ -369,13 +369,17 @@ def prune(root, config, now, keep):
         if directory.name == keep or not SET_ID.fullmatch(directory.name):
             continue
         try:
-            manifest = verify_set(directory, config)
+            manifest, _checksums = checked_manifest(directory, config)
             expired = parse_stamp(manifest["snapshot_utc"]) < cutoff
             scheduled = manifest["kind"] == "scheduled"
         except (Failure, OSError, ValueError, KeyError, TypeError):
             # Foreign, modified or malformed material is never a deletion candidate.
             continue
         if scheduled and expired:
+            try:
+                require(verify_set(directory, config) == manifest, "retention_manifest_changed")
+            except (Failure, OSError, ValueError, KeyError, TypeError):
+                continue
             shutil.rmtree(directory)
             removed += 1
     fsync_directory(root)
@@ -503,7 +507,23 @@ def status_backup(config):
     require(last["snapshot_utc"] == manifest["snapshot_utc"], "last_success")
     age = (utc_now() - parse_stamp(manifest["snapshot_utc"])).total_seconds()
     run = read_json(root / "last-run.json", {config["uid"]})
-    require(age >= 0 and age <= config["max_age_seconds"] and run["status"] != "failed", "backup_unhealthy")
+    require(age >= 0 and age <= config["max_age_seconds"], "backup_unhealthy")
+    require(run.get("status") in ("ok", "running"), "backup_unhealthy")
+    if run["status"] == "running":
+        elapsed = (utc_now() - parse_stamp(run["started_utc"])).total_seconds()
+        require(0 <= elapsed <= config["timeout_seconds"] + 60, "backup_unhealthy")
+        lock_path = root / ".lock"
+        require(stat.S_IMODE(private_file(lock_path, {config["uid"]}).st_mode) == 0o600, "lock_permissions")
+        fd = os.open(str(lock_path), os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(fd, "rb") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                pass
+            else:
+                # A completed run can release its lock between the two reads.
+                latest = read_json(root / "last-run.json", {config["uid"]})
+                require(latest.get("status") == "ok", "backup_unhealthy")
     print("BACKUP_STATUS_OK")
     return 0
 

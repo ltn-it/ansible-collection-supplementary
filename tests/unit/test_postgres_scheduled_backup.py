@@ -11,6 +11,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import unittest
 from pathlib import Path
@@ -252,6 +253,66 @@ class ScheduledBackupTests(unittest.TestCase):
         (old / "database.dump").write_bytes(b"modified-payload")
         self.assertEqual(self.run_backup(), 0)
         self.assertTrue(old.exists())
+
+    def test_retention_hashes_payloads_only_for_expired_scheduled_candidates(self):
+        self.run_backup()
+        recent = self.completed()[0]
+        manual = self.old_set("b" * 12, "manual")
+        expired = self.old_set("c" * 12)
+        with mock.patch.object(WORKER, "digest", wraps=WORKER.digest) as invoked:
+            self.assertEqual(WORKER.prune(self.backups, self.config, WORKER.utc_now(), ""), 1)
+        hashed = [call.args[0] for call in invoked.call_args_list]
+        self.assertNotIn(recent / "database.dump", hashed)
+        self.assertNotIn(manual / "database.dump", hashed)
+        self.assertIn(expired / "database.dump", hashed)
+        self.assertTrue(recent.exists() and manual.exists())
+        self.assertFalse(expired.exists())
+
+    def test_interrupted_worker_is_unhealthy_despite_a_recent_success(self):
+        self.run_backup()
+        program = """import importlib.util,json,sys,time
+spec=importlib.util.spec_from_file_location('worker',sys.argv[1])
+worker=importlib.util.module_from_spec(spec);spec.loader.exec_module(worker)
+def hold(*args):
+    time.sleep(60)
+worker.create_set=hold
+worker.run_backup(json.loads(sys.argv[2]),'scheduled')
+"""
+        process = subprocess.Popen(  # noqa: S603 - fixed worker and private fixture only
+            [sys.executable, "-c", program, str(SOURCE), json.dumps(self.config)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                run = json.loads((self.backups / "last-run.json").read_text())
+                if run["status"] == "running":
+                    break
+                time.sleep(0.01)
+            self.assertEqual(run["status"], "running")
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(WORKER.status_backup(self.config), 0)
+        finally:
+            process.terminate()
+            process.communicate(timeout=5)
+        with self.assertRaises(WORKER.Failure):
+            WORKER.status_backup(self.config)
+
+    def test_running_health_requires_a_held_lock_valid_state_and_deadline(self):
+        self.run_backup()
+        with (self.backups / ".lock").open("rb") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            for status, started in (
+                ("unknown", WORKER.utc_now()),
+                ("running", WORKER.utc_now() - WORKER.datetime.timedelta(seconds=91)),
+                ("running", WORKER.utc_now() + WORKER.datetime.timedelta(seconds=30)),
+            ):
+                WORKER.atomic_json(
+                    self.backups / "last-run.json", {"status": status, "started_utc": WORKER.stamp(started)}
+                )
+                with self.assertRaises(WORKER.Failure):
+                    WORKER.status_backup(self.config)
 
     def test_manual_restore_point_does_not_trigger_automatic_pruning(self):
         old = self.old_set("a" * 12)

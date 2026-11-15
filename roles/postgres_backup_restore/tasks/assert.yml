@@ -73,6 +73,22 @@
     - postgres_backup_restore_schedule_state == 'present'
   tags: always
 
+- name: Reject noninteger scheduled PostgreSQL numeric settings before conversion
+  ansible.builtin.assert:
+    that:
+      - item is integer or (item is string and item is match('^[0-9]+\Z'))
+    fail_msg: Scheduled backup limits must be integers or decimal integer strings, without booleans or fractions.
+    quiet: true
+  loop:
+    - "{{ postgres_backup_restore_schedule_retention_days }}"
+    - "{{ postgres_backup_restore_schedule_min_free_percent }}"
+    - "{{ postgres_backup_restore_schedule_timeout_seconds }}"
+    - "{{ postgres_backup_restore_schedule_max_age_seconds }}"
+  when:
+    - postgres_backup_restore_action == 'schedule'
+    - postgres_backup_restore_schedule_state == 'present'
+  tags: always
+
 - name: Validate scheduled PostgreSQL backup settings
   ansible.builtin.assert:
     that:
@@ -101,6 +117,7 @@
       - postgres_backup_restore_schedule_timeout_seconds | int >= 30
       - postgres_backup_restore_schedule_timeout_seconds | int <= 86400
       - postgres_backup_restore_schedule_max_age_seconds | int > 0
+      - postgres_backup_restore_schedule_max_age_seconds | int <= 31536000
       - postgres_backup_restore_schedule_calendar is sequence
       - postgres_backup_restore_schedule_calendar is not string
       - postgres_backup_restore_schedule_calendar | length > 0

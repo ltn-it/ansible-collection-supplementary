@@ -82,6 +82,10 @@ sets. Only valid expired `scheduled` sets belonging to this instance/database
 are eligible for retention. Manual restore points, unknown/modified material
 and symlinks are preserved. Manual runs never trigger pruning. A concurrent
 run returns exit 75 without altering the active operation.
+Retention inspects checked manifest metadata first and hashes payloads only for
+expired scheduled deletion candidates, immediately before removal.
+Numeric schedule limits accept integers or decimal integer strings; booleans,
+fractions and malformed text are rejected before template conversion.
 
 The worker disables password prompts, password-file fallback and inherited
 client credentials. It uses the configured Unix socket and never forwards a
@@ -162,6 +166,9 @@ python3 /usr/local/libexec/postgres-backup.py \
 database snapshot age, not the later completion/copy time, and flags a failed
 latest attempt. It does not certify an external copy. Success markers are
 `BACKUP_COMPLETED`, `BACKUP_SET_VERIFIED` and `BACKUP_STATUS_OK`.
+A running attempt is healthy only while the backup lock is held and its age is
+within the service deadline (configured timeout plus 60 seconds). An abandoned,
+overdue or unknown last-run state is unhealthy even with a recent successful set.
 
 For rollback, set `postgres_backup_restore_schedule_state=absent`. Only the
 instance's cron trigger, timer, service and settings are removed. The shared
@@ -207,6 +214,10 @@ has a record-loss window. Removing a schedule preserves operational logs.
 Manual backup/restore actions use the same protected file when explicitly enabled:
 quoted native database commands append stdout/stderr directly with UTC START/END
 and exit status. Backup dump bytes remain in the backup file, never in the log.
+Logged backups write to a fresh private temporary file in the destination
+directory and atomically replace the destination only after a successful dump.
+Existing hardlinks retain their old bytes; failed dumps preserve the prior
+destination and remove the partial temporary file.
 Client-mode custom restores retain the regular archive filename, including for
 `--jobs` parallel restoration. Plain SQL and the existing Podman restore path
 continue reading their input through stdin.

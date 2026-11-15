@@ -14,7 +14,7 @@ ROLE = Path(__file__).resolve().parents[2] / "roles/postgres_backup_restore"
 
 
 class LegacyCaptureTests(unittest.TestCase):
-    def invoke(self, value):
+    def invoke(self, value, extra_variables=None):
         tasks = yaml.safe_load((ROLE / "tasks/assert.yml").read_text())
         task = next(
             t
@@ -31,17 +31,24 @@ class LegacyCaptureTests(unittest.TestCase):
                             hosts="localhost",
                             connection="local",
                             gather_facts=False,
-                            vars=dict(
-                                postgres_backup_restore_action="schedule",
-                                postgres_backup_restore_schedule_state="present",
-                                postgres_backup_restore_schedule_log_config=value,
-                                postgres_backup_restore_operations_log_file=value,
-                                postgres_backup_restore_schedule_instance="fixture",
-                                postgres_backup_restore_backup_dir="/srv/backups",
-                                postgres_backup_restore_schedule_pgdata_dir="/srv/data",
-                                postgres_backup_restore_file="/srv/backups/fixture.dump",
-                                postgres_backup_restore_restore_source="/srv/backups/fixture.dump",
-                            ),
+                            vars={
+                                **dict(
+                                    postgres_backup_restore_action="schedule",
+                                    postgres_backup_restore_schedule_state="present",
+                                    postgres_backup_restore_schedule_log_config=value,
+                                    postgres_backup_restore_operations_log_file=value,
+                                    postgres_backup_restore_schedule_instance="fixture",
+                                    postgres_backup_restore_backup_dir="/srv/backups",
+                                    postgres_backup_restore_schedule_pgdata_dir="/srv/data",
+                                    postgres_backup_restore_file="/srv/backups/fixture.dump",
+                                    postgres_backup_restore_restore_source="/srv/backups/fixture.dump",
+                                    postgres_backup_restore_schedule_retention_days=14,
+                                    postgres_backup_restore_schedule_min_free_percent=20,
+                                    postgres_backup_restore_schedule_timeout_seconds=30,
+                                    postgres_backup_restore_schedule_max_age_seconds=50400,
+                                ),
+                                **(extra_variables or {}),
+                            },
                             tasks=[copy.deepcopy(task)],
                         )
                     ]
@@ -90,3 +97,22 @@ class StandardOutputTests(unittest.TestCase):
                 result = self.invoke(value)
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                 self.assertIn("Use the instance-specific operations.log", result.stdout)
+
+
+class ScheduleNumericTests(unittest.TestCase):
+    task_name = "Reject noninteger scheduled PostgreSQL numeric settings before conversion"
+    invoke = LegacyCaptureTests.invoke
+    fields = ("retention_days", "min_free_percent", "timeout_seconds", "max_age_seconds")
+
+    def test_integer_and_decimal_integer_text_are_accepted(self):
+        for value in (20, "20"):
+            result = self.invoke("", {"postgres_backup_restore_schedule_" + field: value for field in self.fields})
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_each_limit_rejects_malformed_text_boolean_and_fraction(self):
+        for field in self.fields:
+            for value in ("twenty", True, 20.5, "20\n"):
+                with self.subTest(field=field, value=value):
+                    result = self.invoke("", {"postgres_backup_restore_schedule_" + field: value})
+                    self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                    self.assertIn("Scheduled backup limits must be integers", result.stdout)
