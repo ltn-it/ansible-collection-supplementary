@@ -47,6 +47,9 @@ Staging has mode 0700/0600 and is removed on success and failure. Check mode als
 creates and removes this temporary staging, while publication remains a prediction.
 Temporary staging does not invalidate the applied-state marker; managed-copy
 changes or failures retain pending reconciliation.
+Staging cleanup is attempted independently even when applied-marker invalidation
+fails. Such an invalidation failure remains fatal; cleanup does not turn a failed
+certificate update into success.
 This candidate has no general rootless platform or release acceptance claim.
 
 Key variables:

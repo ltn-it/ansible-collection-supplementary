@@ -95,22 +95,24 @@
       become_user: "{{ keycloak_deploy_rootless_user }}"
 
   always:
-    - name: Retain a pending Keycloak restart after CA changes or an uncertain copy
-      ansible.builtin.file:
-        path: "{{ keycloak_deploy_config_dir }}/.keycloak-last-applied"
-        state: absent
-      when:
-        - >-
-          (keycloak_deploy_truststore_copy | default({})) is changed or
-          (keycloak_deploy_truststore_copy | default({})) is failed
-        - not ansible_check_mode
-
-    - name: Remove only this attempt's private certificate staging
-      ansible.builtin.file:
-        path: "{{ keycloak_deploy_truststore_stage.path }}"
-        state: absent
-      when: keycloak_deploy_truststore_stage.path is defined
-      become: true
-      become_user: "{{ keycloak_deploy_rootless_user }}"
-      check_mode: false
-      changed_when: false
+    - name: Attempt marker invalidation and independently clean private staging
+      block:
+        - name: Retain a pending Keycloak restart after CA changes or an uncertain copy
+          ansible.builtin.file:
+            path: "{{ keycloak_deploy_config_dir }}/.keycloak-last-applied"
+            state: absent
+          when:
+            - >-
+              (keycloak_deploy_truststore_copy | default({})) is changed or
+              (keycloak_deploy_truststore_copy | default({})) is failed
+            - not ansible_check_mode
+      always:
+        - name: Remove only this attempt's private certificate staging
+          ansible.builtin.file:
+            path: "{{ keycloak_deploy_truststore_stage.path }}"
+            state: absent
+          when: keycloak_deploy_truststore_stage.path is defined
+          become: true
+          become_user: "{{ keycloak_deploy_rootless_user }}"
+          check_mode: false
+          changed_when: false

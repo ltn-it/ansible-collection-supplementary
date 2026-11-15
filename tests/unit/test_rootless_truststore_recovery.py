@@ -132,7 +132,7 @@ class TruststoreRecovery(unittest.TestCase):
             with self.subTest(variant=variant):
                 self.guard_case(variant)
 
-    def copy_case(self, partial_failure, link_variant=None, check_mode=False):
+    def copy_case(self, partial_failure, link_variant=None, check_mode=False, invalidation_failure=False):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "sources"
@@ -213,8 +213,19 @@ class TruststoreRecovery(unittest.TestCase):
                 return
             staging_before = {p.name for p in Path(tempfile.gettempdir()).glob("lit-keycloak-ca-*")}
             before = {p.name: (p.read_bytes(), p.stat().st_mode, p.stat().st_mtime_ns) for p in destination.iterdir()}
-            self.run_play(root, tasks, variables, 2 if partial_failure else 0, check_mode=check_mode)
+            if invalidation_failure:
+                self.assertNotEqual(os.getuid(), 0, "requires the prescribed non-root EE")
+                configuration.chmod(0o500)
+            try:
+                output = self.run_play(root, tasks, variables, 2 if partial_failure else 0, check_mode=check_mode)
+            finally:
+                configuration.chmod(0o700)
             self.assertEqual(staging_before, {p.name for p in Path(tempfile.gettempdir()).glob("lit-keycloak-ca-*")})
+            if invalidation_failure:
+                self.assertIn("Permission denied", output)
+                self.assertIn("Remove only this attempt's private certificate staging", output)
+                self.assertEqual(marker.read_text(), "APPLIED\n")
+                return
             if check_mode:
                 after = {
                     p.name: (p.read_bytes(), p.stat().st_mode, p.stat().st_mtime_ns) for p in destination.iterdir()
@@ -230,6 +241,9 @@ class TruststoreRecovery(unittest.TestCase):
 
     def test_partial_copy_failure_invalidates_marker_even_before_an_unchanged_retry(self):
         self.copy_case(True)
+
+    def test_marker_invalidation_failure_still_cleans_staging_and_propagates_failure(self):
+        self.copy_case(True, invalidation_failure=True)
 
     def test_unchanged_successful_ca_copies_preserve_applied_marker(self):
         self.copy_case(False)
