@@ -14,7 +14,7 @@ ROLE = Path(__file__).resolve().parents[2] / "roles/postgres_backup_restore"
 
 
 class OperationalOutputTests(unittest.TestCase):
-    def execute(self, action, mode, fmt, rc=0):
+    def execute(self, action, mode, fmt, rc=0, restore_args=None):
         nonce = secrets.token_hex(16)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -33,6 +33,18 @@ esac
 printf '%s\\n' 'private-diagnostic-fixture' >&2
 case "$0" in
   *pg_dump) printf '%s' 'fixture-dump' ;;
+  *pg_restore)
+     if [ "$PGTEST_FILE_MODE" = 1 ]; then
+       for last do :; done
+       [ "$last" = "$PGTEST_SOURCE" ] || exit 95
+       [ -f "$last" ] && [ "$(cat "$last")" = 'fixture-source' ] || exit 98
+       if [ "$PGTEST_REQUIRE_PARALLEL" = 1 ]; then
+         case " $* " in *" --jobs=4 "*) ;; *) exit 94 ;; esac
+       fi
+     else
+       [ "$(cat)" = 'fixture-source' ] || exit 98
+     fi
+     printf '%s\\n' 'fixture-restored' ;;
   *) [ "$(cat)" = 'fixture-source' ] || exit 98
      printf '%s\\n' 'fixture-restored' ;;
 esac
@@ -56,6 +68,7 @@ exec "$@"
                 postgres_backup_restore_execution_mode=mode,
                 postgres_backup_restore_format=fmt,
                 postgres_backup_restore_db_name="fixture",
+                postgres_backup_restore_extra_pg_restore_args=restore_args or [],
                 postgres_backup_restore_db_user="fixture",
                 postgres_backup_restore_db_host="/fixture-socket",
                 postgres_backup_restore_db_port=5432,
@@ -67,7 +80,11 @@ exec "$@"
                 postgres_backup_restore_schedule_user="unused-fixture-account",
                 postgres_backup_restore_schedule_home=str(root),
                 postgres_backup_restore_schedule_environment=dict(
-                    PATH=str(binary) + ":" + os.environ["PATH"], PGTEST_RC=str(rc)
+                    PATH=str(binary) + ":" + os.environ["PATH"],
+                    PGTEST_RC=str(rc),
+                    PGTEST_FILE_MODE="1" if mode == "client" and fmt == "custom" else "0",
+                    PGTEST_SOURCE=str(source),
+                    PGTEST_REQUIRE_PARALLEL="1" if restore_args else "0",
                 ),
             )
             tasks = yaml.safe_load((ROLE / "tasks/logged_operation.yml").read_text())
@@ -124,3 +141,6 @@ exec "$@"
         for mode in ("client", "podman"):
             with self.subTest(mode=mode):
                 self.execute("restore", mode, "custom", rc=7)
+
+    def test_parallel_client_restore_keeps_a_regular_named_archive(self):
+        self.execute("restore", "client", "custom", restore_args=["--jobs=4"])

@@ -27,22 +27,24 @@
     state: directory
     mode: '0755'
 
-- name: Copy validated public CA certificates
-  ansible.builtin.copy:
-    src: "{{ item }}"
-    dest: "{{ keycloak_deploy_truststore_dir }}/{{ item | basename }}"
-    mode: '0644'
-    owner: "{{ keycloak_deploy_rootless_user }}"
-    validate: /usr/bin/openssl x509 -in %s -noout
-  loop: "{{ keycloak_deploy_truststore_sources }}"
-  register: keycloak_deploy_truststore_copy
-  become: true
-  become_user: root
-
-- name: Retain a pending Keycloak restart after CA certificate changes
-  ansible.builtin.file:
-    path: "{{ keycloak_deploy_config_dir }}/.keycloak-last-applied"
-    state: absent
-  when:
-    - keycloak_deploy_truststore_copy is changed
-    - not ansible_check_mode
+- name: Retain pending reconciliation even after a partial public CA copy failure
+  block:
+    - name: Copy validated public CA certificates
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ keycloak_deploy_truststore_dir }}/{{ item | basename }}"
+        mode: '0644'
+        owner: "{{ keycloak_deploy_rootless_user }}"
+        validate: /usr/bin/openssl x509 -in %s -noout
+      loop: "{{ keycloak_deploy_truststore_sources }}"
+      register: keycloak_deploy_truststore_copy
+      become: true
+      become_user: root
+  always:
+    - name: Retain a pending Keycloak restart after CA changes or an uncertain copy
+      ansible.builtin.file:
+        path: "{{ keycloak_deploy_config_dir }}/.keycloak-last-applied"
+        state: absent
+      when:
+        - keycloak_deploy_truststore_copy is changed or keycloak_deploy_truststore_copy is failed
+        - not ansible_check_mode

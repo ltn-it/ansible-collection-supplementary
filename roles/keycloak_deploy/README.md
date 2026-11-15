@@ -24,7 +24,13 @@ SELinux. Removing previously copied CA files is deliberately not automatic.
 
 For an existing rootless installation, the `rootless-truststore-update` task
 entrypoint validates that the rendered manifest differs only by the truststore
-volume and mount before applying it. Root become permission is required for
+volume and mount before applying it. Existing truststore sources, mount paths
+and read-only modes must remain unchanged; addition is allowed, replacement is
+not. YAML comparison runs privately on the Ansible controller and does not
+require PyYAML on the managed host. A changed or failed CA copy invalidates the
+applied-state marker even if only an earlier copy succeeded. The next successful
+retry retains that pending restart until reconciliation. Unchanged successful
+copies preserve the marker. Root become permission is required for
 the explicitly owned CA and manifest copies. Invoke other tasks as the existing runtime user with
 its user-manager environment and resolved `keycloak_deploy_rootless_uid` and
 `keycloak_deploy_rootless_quadlet_dir`. Existing deployment inputs, including

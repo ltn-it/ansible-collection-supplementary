@@ -11,7 +11,9 @@
       2>> {{ postgres_backup_restore_operations_log_file | quote }}
     {% else %}
     {{ postgres_backup_restore_logged_argv | map('quote') | join(' ') }} \
+    {% if postgres_backup_restore_execution_mode == 'podman' or postgres_backup_restore_format == 'plain' %}
       < {{ postgres_backup_restore_restore_source | quote }} \
+    {% endif %}
       >> {{ postgres_backup_restore_operations_log_file | quote }} 2>&1
     {% endif %}
     operation_rc=$?
@@ -36,7 +38,8 @@
          (['--clean'] if postgres_backup_restore_clean | bool else []) +
          (['--if-exists'] if postgres_backup_restore_if_exists | bool else []) +
          (['--create'] if postgres_backup_restore_create_db | bool else []) +
-         postgres_backup_restore_extra_pg_restore_args }}
+         postgres_backup_restore_extra_pg_restore_args +
+         ([postgres_backup_restore_restore_source] if postgres_backup_restore_execution_mode == 'client' else []) }}
     postgres_backup_restore_logged_plain_restore: >-
       {{ ['psql'] + postgres_backup_restore_logged_connection +
          ['--dbname', postgres_backup_restore_db_name] + postgres_backup_restore_extra_psql_args +

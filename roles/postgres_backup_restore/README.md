@@ -207,6 +207,9 @@ has a record-loss window. Removing a schedule preserves operational logs.
 Manual backup/restore actions use the same protected file when explicitly enabled:
 quoted native database commands append stdout/stderr directly with UTC START/END
 and exit status. Backup dump bytes remain in the backup file, never in the log.
+Client-mode custom restores retain the regular archive filename, including for
+`--jobs` parallel restoration. Plain SQL and the existing Podman restore path
+continue reading their input through stdin.
 Plain SQL restores enforce ON_ERROR_STOP=1 so SQL errors fail the command.
 Ansible hides command output unconditionally on this path. Podman receives the
 password from the task environment rather than its command line. No installed
