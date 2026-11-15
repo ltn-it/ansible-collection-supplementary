@@ -80,6 +80,8 @@
     fail_msg: Scheduled backup limits must be integers or decimal integer strings, without booleans or fractions.
     quiet: true
   loop:
+    - "{{ postgres_backup_restore_schedule_uid }}"
+    - "{{ postgres_backup_restore_schedule_socket_port }}"
     - "{{ postgres_backup_restore_schedule_retention_days }}"
     - "{{ postgres_backup_restore_schedule_min_free_percent }}"
     - "{{ postgres_backup_restore_schedule_timeout_seconds }}"
@@ -110,6 +112,10 @@
       - not postgres_backup_restore_schedule_pgdata_dir.startswith(postgres_backup_restore_backup_dir + '/')
       - "'..' not in postgres_backup_restore_backup_dir.split('/')"
       - "'..' not in postgres_backup_restore_schedule_pgdata_dir.split('/')"
+      - postgres_backup_restore_schedule_uid | int >= 1
+      - postgres_backup_restore_schedule_uid | int <= 2147483647
+      - postgres_backup_restore_schedule_socket_port | int >= 1
+      - postgres_backup_restore_schedule_socket_port | int <= 65535
       - postgres_backup_restore_schedule_retention_days | int >= 1
       - postgres_backup_restore_schedule_retention_days | int <= 3650
       - postgres_backup_restore_schedule_min_free_percent | int >= 0

@@ -46,6 +46,8 @@ class LegacyCaptureTests(unittest.TestCase):
                                     postgres_backup_restore_schedule_min_free_percent=20,
                                     postgres_backup_restore_schedule_timeout_seconds=30,
                                     postgres_backup_restore_schedule_max_age_seconds=50400,
+                                    postgres_backup_restore_schedule_uid=1000,
+                                    postgres_backup_restore_schedule_socket_port=5432,
                                 ),
                                 **(extra_variables or {}),
                             },
@@ -102,7 +104,7 @@ class StandardOutputTests(unittest.TestCase):
 class ScheduleNumericTests(unittest.TestCase):
     task_name = "Reject noninteger scheduled PostgreSQL numeric settings before conversion"
     invoke = LegacyCaptureTests.invoke
-    fields = ("retention_days", "min_free_percent", "timeout_seconds", "max_age_seconds")
+    fields = ("uid", "socket_port", "retention_days", "min_free_percent", "timeout_seconds", "max_age_seconds")
 
     def test_integer_and_decimal_integer_text_are_accepted(self):
         for value in (20, "20"):

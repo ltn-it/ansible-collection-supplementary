@@ -86,6 +86,9 @@ Retention inspects checked manifest metadata first and hashes payloads only for
 expired scheduled deletion candidates, immediately before removal.
 Numeric schedule limits accept integers or decimal integer strings; booleans,
 fractions and malformed text are rejected before template conversion.
+The same guard includes the runtime UID and socket port. UID-derived service and
+command environment paths use the canonical integer value, including for text
+inputs with leading zeroes.
 
 The worker disables password prompts, password-file fallback and inherited
 client credentials. It uses the configured Unix socket and never forwards a

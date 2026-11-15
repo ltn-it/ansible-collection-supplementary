@@ -8,8 +8,8 @@ After={{ postgres_backup_restore_schedule_after | join(' ') }}
 Type=oneshot
 WorkingDirectory={{ postgres_backup_restore_schedule_home }}
 Environment=HOME={{ postgres_backup_restore_schedule_home }}
-Environment=XDG_RUNTIME_DIR=/run/user/{{ postgres_backup_restore_schedule_uid }}
-Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ postgres_backup_restore_schedule_uid }}/bus
+Environment=XDG_RUNTIME_DIR=/run/user/{{ postgres_backup_restore_schedule_uid | int }}
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ postgres_backup_restore_schedule_uid | int }}/bus
 UMask=0077
 NoNewPrivileges=true
 KillMode=control-group

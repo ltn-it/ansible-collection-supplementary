@@ -77,8 +77,8 @@ postgres_backup_restore_schedule_config: >-
 postgres_backup_restore_schedule_unit_dir: "{{ postgres_backup_restore_schedule_home }}/.config/systemd/user"
 postgres_backup_restore_schedule_environment:
   HOME: "{{ postgres_backup_restore_schedule_home }}"
-  XDG_RUNTIME_DIR: "/run/user/{{ postgres_backup_restore_schedule_uid }}"
-  DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ postgres_backup_restore_schedule_uid }}/bus"
+  XDG_RUNTIME_DIR: "/run/user/{{ postgres_backup_restore_schedule_uid | int }}"
+  DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ postgres_backup_restore_schedule_uid | int }}/bus"
 
 # Empty keeps journald. Nonempty uses systemd append directly, without a capture worker.
 postgres_backup_restore_operations_log_file: ""
