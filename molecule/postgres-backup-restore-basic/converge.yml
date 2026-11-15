@@ -53,11 +53,12 @@
       loop_control:
         loop_var: postgres_backup_restore_test_template
 
-    - name: Render a decimal-text UID with leading zeroes into the actual service template
+    - name: Render a leading-zero decimal UID into the actual service and cron templates
       ansible.builtin.template:
-        src: "{{ postgres_backup_restore_test_role }}/templates/scheduled-backup.service.j2"
-        dest: "{{ postgres_backup_restore_test_root }}/canonical-uid.service"
+        src: "{{ postgres_backup_restore_test_role }}/templates/scheduled-backup.{{ item }}.j2"
+        dest: "{{ postgres_backup_restore_test_root }}/canonical-uid.{{ item }}"
         mode: "0600"
+      loop: [service, cron]
       vars:
         postgres_backup_restore_schedule_uid: "{{ '00' ~ (postgres_backup_restore_test_identity.stdout | trim) }}"
 
@@ -72,7 +73,7 @@
     - name: Read the canonical UID service and environment fixtures
       ansible.builtin.slurp:
         src: "{{ postgres_backup_restore_test_root }}/{{ item }}"
-      loop: [canonical-uid.service, canonical-uid-environment.json]
+      loop: [canonical-uid.service, canonical-uid-environment.json, canonical-uid.cron]
       register: postgres_backup_restore_test_canonical_uid
 
     - name: Require numeric identity paths to be independent of integer text formatting
@@ -87,6 +88,13 @@
           - >-
             postgres_backup_restore_test_uid_environment.DBUS_SESSION_BUS_ADDRESS ==
             'unix:path=/run/user/' ~ (postgres_backup_restore_test_identity.stdout | trim) ~ '/bus'
+          - >-
+            ('XDG_RUNTIME_DIR=/run/user/' ~ (postgres_backup_restore_test_identity.stdout | trim) ~ '\n')
+            in (postgres_backup_restore_test_canonical_uid.results[2].content | b64decode)
+          - >-
+            ('DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/' ~
+             (postgres_backup_restore_test_identity.stdout | trim) ~ '/bus\n')
+            in (postgres_backup_restore_test_canonical_uid.results[2].content | b64decode)
       vars:
         postgres_backup_restore_test_uid_environment: >-
           {{ postgres_backup_restore_test_canonical_uid.results[1].content | b64decode | from_json }}

@@ -2,8 +2,8 @@
 SHELL=/bin/sh
 PATH=/usr/bin:/bin
 HOME={{ postgres_backup_restore_schedule_home }}
-XDG_RUNTIME_DIR=/run/user/{{ postgres_backup_restore_schedule_uid }}
-DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ postgres_backup_restore_schedule_uid }}/bus
+XDG_RUNTIME_DIR=/run/user/{{ postgres_backup_restore_schedule_uid | int }}
+DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ postgres_backup_restore_schedule_uid | int }}/bus
 CRON_TZ={{ postgres_backup_restore_schedule_cron_timezone }}
 MAILTO=""
 {{ postgres_backup_restore_schedule_cron_minute }} {{ postgres_backup_restore_schedule_cron_hour }} * * * {{ postgres_backup_restore_schedule_user }} /usr/bin/systemctl --user start {{ postgres_backup_restore_schedule_unit }}.service

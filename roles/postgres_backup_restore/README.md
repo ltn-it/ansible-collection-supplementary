@@ -250,3 +250,8 @@ active entry. On installation/admission failure, previous worker/trust bytes
 are restored from controller memory and declared trust is rechecked; a failed
 recovery remains an error. No data backup is started by these steps. Removing
 an instance schedule retains the shared worker and its admission.
+
+Runtime UID values transported as decimal text, including leading zeroes, use
+the canonical numeric UID in the JSON configuration, service, command environment
+and Cron environment. Cron and systemd therefore address the same runtime
+directory and user-manager bus.

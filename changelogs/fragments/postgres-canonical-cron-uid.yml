@@ -1,0 +1,5 @@
+---
+bugfixes:
+  - >-
+    postgres_backup_restore - normalize supported decimal UID text in the Cron
+    runtime directory and user-manager bus paths.
