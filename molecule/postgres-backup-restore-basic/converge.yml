@@ -82,11 +82,14 @@
             ('Environment=XDG_RUNTIME_DIR=/run/user/' ~ postgres_backup_restore_test_identity.stdout | trim)
             in (postgres_backup_restore_test_canonical_uid.results[0].content | b64decode)
           - >-
-            (postgres_backup_restore_test_canonical_uid.results[1].content | b64decode | from_json).XDG_RUNTIME_DIR ==
+            postgres_backup_restore_test_uid_environment.XDG_RUNTIME_DIR ==
             '/run/user/' ~ (postgres_backup_restore_test_identity.stdout | trim)
           - >-
-            (postgres_backup_restore_test_canonical_uid.results[1].content | b64decode | from_json).DBUS_SESSION_BUS_ADDRESS ==
+            postgres_backup_restore_test_uid_environment.DBUS_SESSION_BUS_ADDRESS ==
             'unix:path=/run/user/' ~ (postgres_backup_restore_test_identity.stdout | trim) ~ '/bus'
+      vars:
+        postgres_backup_restore_test_uid_environment: >-
+          {{ postgres_backup_restore_test_canonical_uid.results[1].content | b64decode | from_json }}
 
     - name: Validate the fixture through the installed worker without running a backup
       ansible.builtin.command:
