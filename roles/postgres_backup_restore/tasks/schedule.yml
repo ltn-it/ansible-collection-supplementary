@@ -1,4 +1,8 @@
 ---
+- name: Validate worker replacement and application-control admission before mutation
+  ansible.builtin.include_tasks: schedule_worker_preflight.yml
+  when: postgres_backup_restore_schedule_state == 'present'
+
 - name: Read the prepared PostgreSQL backup account
   ansible.builtin.getent:
     database: passwd

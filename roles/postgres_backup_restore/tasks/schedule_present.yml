@@ -159,14 +159,8 @@
   loop: "{{ postgres_backup_restore_schedule_implementation_dirs.results }}"
   when: not item.stat.exists
 
-- name: Install the shared PostgreSQL backup worker
-  ansible.builtin.copy:
-    src: scheduled_backup.py
-    dest: "{{ postgres_backup_restore_schedule_worker }}"
-    owner: root
-    group: root
-    mode: "0644"
-    follow: false
+- name: Install the checked worker and its explicitly selected admission
+  ansible.builtin.include_tasks: schedule_worker.yml
 
 - name: Install the PostgreSQL backup configuration
   ansible.builtin.template:

@@ -213,3 +213,23 @@ password from the task environment rather than its command line. No installed
 capture helper or daemon is used. The caller must supply the same existing account,
 UID, home and PGDATA as for scheduled backups. Full database/SELinux/systemd and
 concurrent rotation tests remain required; command fixtures do not prove restore.
+
+### Existing application control
+
+Before replacing a scheduled worker, the role checks the existing fapolicyd
+service. With active application control, an unchanged worker must already match
+the active path/size/SHA256 entry. A different or untrusted payload stops before
+replacement unless both `postgres_backup_restore_schedule_fapolicyd_trust_file`
+(a dedicated file under `/etc/fapolicyd/trust.d/`) and
+`postgres_backup_restore_schedule_fapolicyd_approved_sha256` explicitly select
+and approve the exact packaged worker. Both default to empty. The preflight can
+be called separately with `tasks_from: schedule_worker_preflight` before other
+setup mutations.
+
+Admission manages only the single selected worker declaration, preserving other
+trust files, global policy and service configuration. The existing service is
+not enabled, restarted or made permissive. A bounded read-back verifies the
+active entry. On installation/admission failure, previous worker/trust bytes
+are restored from controller memory and declared trust is rechecked; a failed
+recovery remains an error. No data backup is started by these steps. Removing
+an instance schedule retains the shared worker and its admission.

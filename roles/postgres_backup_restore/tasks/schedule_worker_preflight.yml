@@ -1,0 +1,201 @@
+---
+- name: Validate the scoped backup-worker application-control contract
+  ansible.builtin.assert:
+    that:
+      - postgres_backup_restore_schedule_worker is match('^/usr/local/libexec/postgres-backup(-[A-Za-z0-9_-]+)?[.]py\Z')
+      - postgres_backup_restore_schedule_fapolicyd_trust_file is string
+      - postgres_backup_restore_schedule_fapolicyd_approved_sha256 is string
+      - >-
+        (postgres_backup_restore_schedule_fapolicyd_trust_file == '') ==
+        (postgres_backup_restore_schedule_fapolicyd_approved_sha256 == '')
+      - >-
+        postgres_backup_restore_schedule_fapolicyd_trust_file == '' or
+        postgres_backup_restore_schedule_fapolicyd_trust_file
+        is match('^/etc/fapolicyd/trust[.]d/[A-Za-z0-9][A-Za-z0-9_.-]*\Z')
+      - >-
+        postgres_backup_restore_schedule_fapolicyd_approved_sha256 == '' or
+        postgres_backup_restore_schedule_fapolicyd_approved_sha256 is match('^[a-f0-9]{64}\Z')
+    quiet: true
+
+- name: Inspect the packaged backup-worker payload in the controller
+  ansible.builtin.stat:
+    path: "{{ role_path }}/files/scheduled_backup.py"
+    checksum_algorithm: sha256
+    get_mime: false
+  delegate_to: localhost
+  become: false
+  register: postgres_backup_restore_worker_payload
+
+- name: Require approval to name the exact packaged worker bytes
+  ansible.builtin.assert:
+    that:
+      - >-
+        postgres_backup_restore_schedule_fapolicyd_approved_sha256 ==
+        postgres_backup_restore_worker_payload.stat.checksum
+    quiet: true
+    fail_msg: The approved digest does not identify the packaged backup worker; no replacement is allowed.
+  when: postgres_backup_restore_schedule_fapolicyd_trust_file | length > 0
+
+- name: Inspect the installed backup worker before any replacement
+  ansible.builtin.stat:
+    path: "{{ postgres_backup_restore_schedule_worker }}"
+    follow: false
+    checksum_algorithm: sha256
+    get_mime: false
+  register: postgres_backup_restore_previous_worker
+
+- name: Reject unsafe existing backup-worker metadata
+  ansible.builtin.assert:
+    that:
+      - >-
+        not postgres_backup_restore_previous_worker.stat.exists or
+        (postgres_backup_restore_previous_worker.stat.isreg | default(false) and
+         not postgres_backup_restore_previous_worker.stat.islnk | default(false) and
+         postgres_backup_restore_previous_worker.stat.nlink == 1 and
+         postgres_backup_restore_previous_worker.stat.uid == 0 and
+         postgres_backup_restore_previous_worker.stat.size <= 16777216 and
+         'i' not in (postgres_backup_restore_previous_worker.stat.attr_flags | default('')) and
+         'a' not in (postgres_backup_restore_previous_worker.stat.attr_flags | default('')) and
+         not postgres_backup_restore_previous_worker.stat.wgrp | default(false) and
+         not postgres_backup_restore_previous_worker.stat.woth | default(false))
+    quiet: true
+
+- name: Observe whether the existing application-control service is active
+  ansible.builtin.command:
+    argv: [systemctl, is-active, fapolicyd.service]
+  register: postgres_backup_restore_fapolicyd_state
+  changed_when: false
+  failed_when: postgres_backup_restore_fapolicyd_state.rc not in [0, 3, 4]
+  check_mode: false
+
+- name: Bind the requested admission to the packaged worker bytes
+  ansible.builtin.set_fact:
+    postgres_backup_restore_fapolicyd_active: "{{ postgres_backup_restore_fapolicyd_state.rc == 0 }}"
+    postgres_backup_restore_fapolicyd_requested: >-
+      {{ postgres_backup_restore_schedule_fapolicyd_trust_file | length > 0 }}
+    postgres_backup_restore_fapolicyd_expected_pattern: >-
+      {{ '^\\S+\\s+' ~ (postgres_backup_restore_schedule_worker | regex_escape) ~ '\\s+' ~
+         (postgres_backup_restore_worker_payload.stat.size | string) ~ '\\s+' ~
+         postgres_backup_restore_worker_payload.stat.checksum ~ '\\s*\\Z' }}
+    postgres_backup_restore_fapolicyd_target_pattern: >-
+      ^\S+\s+{{ postgres_backup_restore_schedule_worker | regex_escape }}\s+
+
+- name: Read the existing active trust database without displaying its contents
+  ansible.builtin.command:
+    argv: [/usr/sbin/fapolicyd-cli, --dump-db]
+  register: postgres_backup_restore_fapolicyd_before
+  changed_when: false
+  check_mode: false
+  when: postgres_backup_restore_fapolicyd_active | bool
+  no_log: true
+
+- name: Preserve an admitted worker unless its exact replacement is approved
+  ansible.builtin.assert:
+    that:
+      - >-
+        postgres_backup_restore_previous_worker.stat.checksum | default('') ==
+        postgres_backup_restore_worker_payload.stat.checksum
+      - >-
+        postgres_backup_restore_fapolicyd_before.stdout_lines
+        | select('match', postgres_backup_restore_fapolicyd_expected_pattern) | list | length == 1
+      - >-
+        postgres_backup_restore_fapolicyd_before.stdout_lines
+        | select('match', postgres_backup_restore_fapolicyd_target_pattern) | list | length == 1
+    quiet: true
+    fail_msg: >-
+      FAPOLICYD_WORKER_APPROVAL_REQUIRED: preserve the installed backup worker;
+      explicitly approve the packaged SHA256 and its dedicated existing trust file before replacement.
+  when:
+    - postgres_backup_restore_fapolicyd_active | bool
+    - not postgres_backup_restore_fapolicyd_requested | bool
+
+- name: Require an active service and an exact payload approval for scoped admission
+  ansible.builtin.assert:
+    that:
+      - postgres_backup_restore_fapolicyd_active | bool
+    quiet: true
+    fail_msg: Scoped admission requires the active existing service and explicit approval of these exact packaged bytes.
+  when: postgres_backup_restore_fapolicyd_requested | bool
+
+- name: Inspect the existing application-control configuration directories
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop: [/etc/fapolicyd, /etc/fapolicyd/trust.d]
+  register: postgres_backup_restore_fapolicyd_directories
+  when: postgres_backup_restore_fapolicyd_requested | bool
+
+- name: Require protected real application-control directories
+  ansible.builtin.assert:
+    that:
+      - item.stat.isdir | default(false)
+      - not item.stat.islnk | default(false)
+      - item.stat.uid == 0
+      - not item.stat.wgrp | default(false)
+      - not item.stat.woth | default(false)
+    quiet: true
+  loop: "{{ postgres_backup_restore_fapolicyd_directories.results }}"
+  when: postgres_backup_restore_fapolicyd_requested | bool
+
+- name: Inspect only the explicitly selected dedicated trust file
+  ansible.builtin.stat:
+    path: "{{ postgres_backup_restore_schedule_fapolicyd_trust_file }}"
+    follow: false
+    get_checksum: false
+    get_mime: false
+  register: postgres_backup_restore_previous_trust
+  when: postgres_backup_restore_fapolicyd_requested | bool
+
+- name: Reject foreign or unsafe dedicated trust-file metadata
+  ansible.builtin.assert:
+    that:
+      - >-
+        not postgres_backup_restore_previous_trust.stat.exists or
+        (postgres_backup_restore_previous_trust.stat.isreg | default(false) and
+         not postgres_backup_restore_previous_trust.stat.islnk | default(false) and
+         postgres_backup_restore_previous_trust.stat.nlink == 1 and
+         postgres_backup_restore_previous_trust.stat.uid == 0 and
+         postgres_backup_restore_previous_trust.stat.size <= 16384 and
+         'i' not in (postgres_backup_restore_previous_trust.stat.attr_flags | default('')) and
+         'a' not in (postgres_backup_restore_previous_trust.stat.attr_flags | default('')) and
+         not postgres_backup_restore_previous_trust.stat.wgrp | default(false) and
+         not postgres_backup_restore_previous_trust.stat.woth | default(false))
+      - >-
+        postgres_backup_restore_previous_trust.stat.exists or
+        postgres_backup_restore_fapolicyd_before.stdout_lines
+        | select('match', postgres_backup_restore_fapolicyd_target_pattern) | list | length == 0
+      - >-
+        postgres_backup_restore_fapolicyd_before.stdout_lines
+        | select('match', postgres_backup_restore_fapolicyd_target_pattern) | list | length <= 1
+    quiet: true
+    fail_msg: >-
+      Select the dedicated existing worker trust file; do not replace foreign
+      entries or create a competing trust source.
+  when: postgres_backup_restore_fapolicyd_requested | bool
+
+- name: Retain the original dedicated trust bytes only in controller memory
+  ansible.builtin.slurp:
+    src: "{{ postgres_backup_restore_schedule_fapolicyd_trust_file }}"
+  register: postgres_backup_restore_previous_trust_bytes
+  when:
+    - postgres_backup_restore_fapolicyd_requested | bool
+    - postgres_backup_restore_previous_trust.stat.exists
+  no_log: true
+
+- name: Validate that an existing dedicated file declares only this worker
+  ansible.builtin.assert:
+    that:
+      - postgres_backup_restore_fapolicyd_old_rows | length == 1
+      - >-
+        postgres_backup_restore_fapolicyd_old_rows[0] is match(
+        '^' ~ (postgres_backup_restore_schedule_worker | regex_escape) ~ '\s+[0-9]+\s+[a-f0-9]{64}\s*\Z')
+    quiet: true
+    fail_msg: The selected trust file must contain exactly one worker declaration and optional comments.
+  vars:
+    postgres_backup_restore_fapolicyd_old_rows: >-
+      {{ (postgres_backup_restore_previous_trust_bytes.content | b64decode).splitlines()
+         | reject('match', '^\s*(#.*)?$') | list }}
+  when:
+    - postgres_backup_restore_fapolicyd_requested | bool
+    - postgres_backup_restore_previous_trust.stat.exists
+  no_log: true

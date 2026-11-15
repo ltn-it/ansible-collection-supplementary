@@ -51,7 +51,12 @@ class LegacyCaptureTests(unittest.TestCase):
             self.assertIsNotNone(executable, "Use the pinned development EE")
             env = dict(os.environ, ANSIBLE_LOCAL_TEMP=str(Path(temporary) / "local"))
             return subprocess.run(  # noqa: S603 - generated fixture and trusted EE executable
-                [executable, "-i", "localhost,", str(playbook)], env=env, capture_output=True, text=True, timeout=30
+                [executable, "-i", "localhost,", str(playbook)],
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
 
     def test_direct_worker_configuration_accepts_empty_legacy_input(self):

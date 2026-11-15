@@ -1,0 +1,165 @@
+---
+- name: Retain the previous worker only in controller memory before replacement
+  ansible.builtin.slurp:
+    src: "{{ postgres_backup_restore_schedule_worker }}"
+  register: postgres_backup_restore_previous_worker_bytes
+  when: postgres_backup_restore_previous_worker.stat.exists
+  no_log: true
+
+- name: Install the worker and reconcile only its explicitly approved admission
+  block:
+    - name: Install the shared PostgreSQL backup worker
+      ansible.builtin.copy:
+        src: scheduled_backup.py
+        dest: "{{ postgres_backup_restore_schedule_worker }}"
+        owner: root
+        group: root
+        mode: "0644"
+        follow: false
+      register: postgres_backup_restore_worker_copy
+
+    - name: Read the installed worker bytes before any trust declaration
+      ansible.builtin.stat:
+        path: "{{ postgres_backup_restore_schedule_worker }}"
+        follow: false
+        checksum_algorithm: sha256
+        get_mime: false
+      register: postgres_backup_restore_installed_worker
+      when: not ansible_check_mode
+
+    - name: Require the installed worker to match the approved packaged payload
+      ansible.builtin.assert:
+        that:
+          - postgres_backup_restore_installed_worker.stat.isreg | default(false)
+          - not postgres_backup_restore_installed_worker.stat.islnk | default(false)
+          - postgres_backup_restore_installed_worker.stat.nlink == 1
+          - postgres_backup_restore_installed_worker.stat.uid == 0
+          - >-
+            postgres_backup_restore_installed_worker.stat.checksum ==
+            postgres_backup_restore_worker_payload.stat.checksum
+          - postgres_backup_restore_installed_worker.stat.size == postgres_backup_restore_worker_payload.stat.size
+        quiet: true
+      when: not ansible_check_mode
+
+    - name: Write only the explicitly approved worker trust declaration
+      ansible.builtin.copy:
+        content: >-
+          {{ postgres_backup_restore_schedule_worker }} {{ postgres_backup_restore_worker_payload.stat.size }}
+          {{ postgres_backup_restore_worker_payload.stat.checksum }}{{ '\n' }}
+        dest: "{{ postgres_backup_restore_schedule_fapolicyd_trust_file }}"
+        owner: root
+        group: root
+        mode: "0600"
+        follow: false
+      register: postgres_backup_restore_trust_copy
+      when: postgres_backup_restore_fapolicyd_requested | bool
+
+    - name: Refresh the active database only when scoped worker admission needs reconciliation
+      ansible.builtin.command:
+        argv: [/usr/sbin/fapolicyd-cli, --update]
+      changed_when: true
+      when:
+        - not ansible_check_mode
+        - postgres_backup_restore_fapolicyd_requested | bool
+        - >-
+          postgres_backup_restore_worker_copy is changed or postgres_backup_restore_trust_copy is changed or
+          postgres_backup_restore_fapolicyd_before.stdout_lines
+          | select('match', postgres_backup_restore_fapolicyd_expected_pattern) | list | length != 1
+
+    - name: Confirm the exact active worker path size and digest without displaying the database
+      ansible.builtin.command:
+        argv: [/usr/sbin/fapolicyd-cli, --dump-db]
+      register: postgres_backup_restore_fapolicyd_after
+      changed_when: false
+      until:
+        - >-
+          postgres_backup_restore_fapolicyd_after.stdout_lines
+          | select('match', postgres_backup_restore_fapolicyd_expected_pattern) | list | length == 1
+        - >-
+          postgres_backup_restore_fapolicyd_after.stdout_lines
+          | select('match', postgres_backup_restore_fapolicyd_target_pattern) | list | length == 1
+      retries: 10
+      delay: 1
+      when:
+        - not ansible_check_mode
+        - postgres_backup_restore_fapolicyd_requested | bool
+      no_log: true
+
+  rescue:
+    - name: Report an unsuccessful dry-run without claiming a state change
+      ansible.builtin.fail:
+        msg: Backup worker dry-run failed; no worker replacement or admission was applied.
+      when: ansible_check_mode
+
+    - name: Restore the exact previous worker bytes after an unsuccessful installation
+      ansible.builtin.copy:
+        content: "{{ postgres_backup_restore_previous_worker_bytes.content | b64decode }}"
+        dest: "{{ postgres_backup_restore_schedule_worker }}"
+        owner: root
+        group: "{{ postgres_backup_restore_previous_worker.stat.gid }}"
+        mode: "{{ postgres_backup_restore_previous_worker.stat.mode }}"
+        follow: false
+      when: postgres_backup_restore_previous_worker.stat.exists
+      no_log: true
+
+    - name: Remove only a newly created worker when restoring its original absence
+      ansible.builtin.file:
+        path: "{{ postgres_backup_restore_schedule_worker }}"
+        state: absent
+      when: not postgres_backup_restore_previous_worker.stat.exists
+
+    - name: Restore the exact previous dedicated trust bytes
+      ansible.builtin.copy:
+        content: "{{ postgres_backup_restore_previous_trust_bytes.content | b64decode }}"
+        dest: "{{ postgres_backup_restore_schedule_fapolicyd_trust_file }}"
+        owner: root
+        group: "{{ postgres_backup_restore_previous_trust.stat.gid }}"
+        mode: "{{ postgres_backup_restore_previous_trust.stat.mode }}"
+        follow: false
+      when:
+        - postgres_backup_restore_fapolicyd_requested | bool
+        - postgres_backup_restore_previous_trust.stat.exists
+      no_log: true
+
+    - name: Remove only a newly created dedicated trust file when restoring original absence
+      ansible.builtin.file:
+        path: "{{ postgres_backup_restore_schedule_fapolicyd_trust_file }}"
+        state: absent
+      when:
+        - postgres_backup_restore_fapolicyd_requested | bool
+        - not postgres_backup_restore_previous_trust.stat.exists
+
+    - name: Refresh the restored trust declarations through the existing service
+      ansible.builtin.command:
+        argv: [/usr/sbin/fapolicyd-cli, --update]
+      changed_when: true
+      when: postgres_backup_restore_fapolicyd_requested | bool
+
+    - name: Verify the restored dedicated declaration in the active database
+      ansible.builtin.command:
+        argv: [/usr/sbin/fapolicyd-cli, --dump-db]
+      register: postgres_backup_restore_fapolicyd_restored
+      changed_when: false
+      until: >-
+        (postgres_backup_restore_fapolicyd_restored.stdout_lines
+         | select('match', postgres_backup_restore_fapolicyd_restore_pattern) | list | length == 1)
+        if postgres_backup_restore_previous_trust.stat.exists else
+        (postgres_backup_restore_fapolicyd_restored.stdout_lines
+         | select('match', postgres_backup_restore_fapolicyd_target_pattern) | list | length == 0)
+      retries: 10
+      delay: 1
+      vars:
+        postgres_backup_restore_fapolicyd_previous_rows: >-
+          {{ (postgres_backup_restore_previous_trust_bytes.content | default('') | b64decode).splitlines()
+             | reject('match', '^\\s*(#.*)?$') | list }}
+        postgres_backup_restore_fapolicyd_restore_pattern: >-
+          ^\S+\s+{{ (postgres_backup_restore_fapolicyd_previous_rows | first | default('')).split()
+          | map('regex_escape') | join('\\s+') }}\s*\Z
+      when: postgres_backup_restore_fapolicyd_requested | bool
+      no_log: true
+
+    - name: Report the failed admission after restoring the previous files and declared trust
+      ansible.builtin.fail:
+        msg: >-
+          Backup worker installation failed; previous files and scoped trust
+          were restored and rechecked. No backup was started.

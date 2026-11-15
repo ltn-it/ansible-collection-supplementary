@@ -66,6 +66,10 @@ postgres_backup_restore_schedule_python_binary: /usr/bin/python3
 postgres_backup_restore_schedule_unit: "postgres-backup-{{ postgres_backup_restore_schedule_instance }}"
 # One host-wide implementation can serve multiple instance-specific configurations.
 postgres_backup_restore_schedule_worker: /usr/local/libexec/postgres-backup.py
+# Explicit opt-in for one existing fapolicyd trust file and approved payload.
+# An active service otherwise requires the installed worker to remain exactly admitted.
+postgres_backup_restore_schedule_fapolicyd_trust_file: ""
+postgres_backup_restore_schedule_fapolicyd_approved_sha256: ""
 # Retired experimental input: only empty is accepted; no external log helper is invoked.
 postgres_backup_restore_schedule_log_config: ""
 postgres_backup_restore_schedule_config: >-

@@ -78,6 +78,7 @@ class ProviderFiles(unittest.TestCase):
                     "ANSIBLE_REMOTE_TEMP": str(root / "remote"),
                     "ANSIBLE_NOCOLOR": "1",
                 },
+                check=False,
                 capture_output=True,
                 text=True,
                 timeout=60,

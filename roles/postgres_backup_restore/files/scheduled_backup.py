@@ -1,4 +1,3 @@
-#!/usr/bin/python3
 """Create private, atomic PostgreSQL backup sets using an existing rootless pod."""
 
 import argparse
@@ -119,7 +118,10 @@ def validate_config(config):
         "socket_port": (1, 65535),
     }
     for key, (minimum, maximum) in limits.items():
-        require(type(config[key]) is int and minimum <= config[key] <= maximum, "numeric_config")
+        require(
+            isinstance(config[key], int) and not isinstance(config[key], bool) and minimum <= config[key] <= maximum,
+            "numeric_config",
+        )
     require(isinstance(config["image"], str) and IMAGE.fullmatch(config["image"]), "image_pin")
     require(
         isinstance(config["source_revision"], str) and re.fullmatch(r"[0-9a-f]{40}", config["source_revision"]),
@@ -228,7 +230,7 @@ class Commands:
                 while reader.get_map():
                     remaining = self.deadline - time.monotonic()
                     require(remaining > 0, "timeout")
-                    for key, _ in reader.select(min(1, remaining)):
+                    for key, _event_mask in reader.select(min(1, remaining)):
                         data = os.read(key.fileobj.fileno(), 1024 * 1024)
                         if not data:
                             reader.unregister(key.fileobj)
@@ -497,7 +499,7 @@ def status_backup(config):
     root = check_root(config)
     last = read_json(root / "last-success.json", {config["uid"]})
     require(last.get("schema") == SCHEMA and SET_ID.fullmatch(last["set_id"]), "last_success")
-    manifest, _ = checked_manifest(root / last["set_id"], config)
+    manifest, _manifest_info = checked_manifest(root / last["set_id"], config)
     require(last["snapshot_utc"] == manifest["snapshot_utc"], "last_success")
     age = (utc_now() - parse_stamp(manifest["snapshot_utc"])).total_seconds()
     run = read_json(root / "last-run.json", {config["uid"]})

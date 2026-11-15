@@ -90,7 +90,12 @@ exec "$@"
             self.assertIsNotNone(executable)
             env = dict(os.environ, ANSIBLE_LOCAL_TEMP=str(root / "local"))
             result = subprocess.run(  # noqa: S603 - generated fixture and trusted EE executable
-                [executable, "-i", "localhost,", str(play)], capture_output=True, text=True, env=env, timeout=40
+                [executable, "-i", "localhost,", str(play)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=40,
             )
             self.assertEqual(result.returncode, 0 if rc == 0 else 2, result.stdout + result.stderr)
             self.assertNotIn(nonce, result.stdout + result.stderr)
