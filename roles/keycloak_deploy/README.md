@@ -40,6 +40,13 @@ encrypted application credentials, must match the active manifest. The entrypoin
 reconciles only Keycloak through `lit.foundational.podman_systemd`; PostgreSQL and
 the proxy are not reconciled. Readiness failure leaves pending restart work and
 requires restoration of the private manifest backup through the same Quadlet.
+
+Certificate validation uses private staging owned by the runtime account, so
+the validator never needs to change attributes on an SSH-owned transfer file.
+Staging has mode 0700/0600 and is removed on success and failure. Check mode also
+creates and removes this temporary staging, while publication remains a prediction.
+Temporary staging does not invalidate the applied-state marker; managed-copy
+changes or failures retain pending reconciliation.
 This candidate has no general rootless platform or release acceptance claim.
 
 Key variables:

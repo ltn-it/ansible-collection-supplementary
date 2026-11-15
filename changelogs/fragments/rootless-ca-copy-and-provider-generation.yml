@@ -4,3 +4,5 @@ bugfixes:
     as the runtime account instead of root.
   - keycloak_deploy - bind validated provider checksums to the Pod generation so changed provider content
     requires successful restart and readiness.
+  - keycloak_deploy - validate public CAs from private runtime-owned staging and remove that staging
+    on success, failure and check-mode execution.

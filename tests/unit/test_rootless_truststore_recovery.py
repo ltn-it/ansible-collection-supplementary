@@ -20,7 +20,7 @@ ANSIBLE = shutil.which("ansible-playbook")
 
 @unittest.skipUnless(ANSIBLE, "requires the prescribed Ansible EE")
 class TruststoreRecovery(unittest.TestCase):
-    def run_play(self, root, tasks, variables, expected_rc):
+    def run_play(self, root, tasks, variables, expected_rc, check_mode=False):
         config = root / "ansible.cfg"
         config.write_text("[defaults]\nstdout_callback=default\n")
         play = root / "play.yml"
@@ -31,7 +31,7 @@ class TruststoreRecovery(unittest.TestCase):
             )
         )
         result = subprocess.run(  # noqa: S603 -- trusted EE executable and generated isolated task fixture.
-            [ANSIBLE, "-i", "managed,", "-c", "local", str(play)],
+            [ANSIBLE, "-i", "managed,", "-c", "local", str(play)] + (["--check"] if check_mode else []),
             env=os.environ
             | {
                 "ANSIBLE_CONFIG": str(config),
@@ -132,7 +132,7 @@ class TruststoreRecovery(unittest.TestCase):
             with self.subTest(variant=variant):
                 self.guard_case(variant)
 
-    def copy_case(self, partial_failure, link_variant=None):
+    def copy_case(self, partial_failure, link_variant=None, check_mode=False):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "sources"
@@ -211,7 +211,15 @@ class TruststoreRecovery(unittest.TestCase):
                 self.assertEqual(before, (sentinel.read_bytes(), sentinel.stat(), outside.stat()))
                 self.assertEqual(marker.read_text(), "APPLIED\n")
                 return
-            self.run_play(root, tasks, variables, 2 if partial_failure else 0)
+            staging_before = {p.name for p in Path(tempfile.gettempdir()).glob("lit-keycloak-ca-*")}
+            before = {p.name: (p.read_bytes(), p.stat().st_mode, p.stat().st_mtime_ns) for p in destination.iterdir()}
+            self.run_play(root, tasks, variables, 2 if partial_failure else 0, check_mode=check_mode)
+            self.assertEqual(staging_before, {p.name for p in Path(tempfile.gettempdir()).glob("lit-keycloak-ca-*")})
+            if check_mode:
+                after = {
+                    p.name: (p.read_bytes(), p.stat().st_mode, p.stat().st_mtime_ns) for p in destination.iterdir()
+                }
+                self.assertEqual(before, after)
             self.assertEqual((destination / certificate.name).read_bytes(), certificate.read_bytes())
             self.assertEqual(preserved.read_bytes(), certificate.read_bytes())
             self.assertEqual(marker.exists(), not partial_failure)
@@ -230,3 +238,6 @@ class TruststoreRecovery(unittest.TestCase):
         for variant in ("directory", "ancestor", "file", "hardlink"):
             with self.subTest(variant=variant):
                 self.copy_case(False, variant)
+
+    def test_check_mode_cleans_private_staging_without_publishing_or_invalidating_the_marker(self):
+        self.copy_case(False, check_mode=True)
