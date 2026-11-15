@@ -56,12 +56,26 @@
       ansible.builtin.copy:
         src: "{{ item }}"
         dest: "{{ keycloak_deploy_truststore_dir }}/{{ item | basename }}"
-        mode: '0644'
-        owner: "{{ keycloak_deploy_rootless_user }}"
+        # The SSH-owned ACL staging file cannot be chmod/chowned by become_user.
+        # Preserve its attributes for validation; normalize only the destination.
+        mode: null
+        owner: null
         follow: false
         validate: /usr/bin/openssl x509 -in %s -noout
       loop: "{{ keycloak_deploy_truststore_sources }}"
       register: keycloak_deploy_truststore_copy
+      become: true
+      become_user: "{{ keycloak_deploy_rootless_user }}"
+
+    - name: Apply public certificate permissions only at the runtime-owned destination
+      ansible.builtin.file:
+        path: "{{ keycloak_deploy_truststore_dir }}/{{ item | basename }}"
+        state: file
+        mode: '0644'
+        owner: "{{ keycloak_deploy_rootless_user }}"
+        follow: false
+      loop: "{{ keycloak_deploy_truststore_sources }}"
+      register: keycloak_deploy_truststore_permissions
       become: true
       become_user: "{{ keycloak_deploy_rootless_user }}"
   always:
@@ -70,5 +84,8 @@
         path: "{{ keycloak_deploy_config_dir }}/.keycloak-last-applied"
         state: absent
       when:
-        - keycloak_deploy_truststore_copy is changed or keycloak_deploy_truststore_copy is failed
+        - >-
+          keycloak_deploy_truststore_copy is changed or keycloak_deploy_truststore_copy is failed or
+          (keycloak_deploy_truststore_permissions | default({})) is changed or
+          (keycloak_deploy_truststore_permissions | default({})) is failed
         - not ansible_check_mode
