@@ -74,9 +74,9 @@
     postgres_backup_restore_fapolicyd_requested: >-
       {{ postgres_backup_restore_schedule_fapolicyd_trust_file | length > 0 }}
     postgres_backup_restore_fapolicyd_expected_pattern: >-
-      {{ '^\\S+\\s+' ~ (postgres_backup_restore_schedule_worker | regex_escape) ~ '\\s+' ~
-         (postgres_backup_restore_worker_payload.stat.size | string) ~ '\\s+' ~
-         postgres_backup_restore_worker_payload.stat.checksum ~ '\\s*\\Z' }}
+      {{ '^\S+\s+' ~ (postgres_backup_restore_schedule_worker | regex_escape) ~ '\s+' ~
+         (postgres_backup_restore_worker_payload.stat.size | string) ~ '\s+' ~
+         postgres_backup_restore_worker_payload.stat.checksum ~ '\s*\Z' }}
     postgres_backup_restore_fapolicyd_target_pattern: >-
       ^\S+\s+{{ postgres_backup_restore_schedule_worker | regex_escape }}\s+
 

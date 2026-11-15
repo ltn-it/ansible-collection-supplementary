@@ -1,7 +1,9 @@
 """Run the real read-only admission preflight against isolated service fixtures."""
 
+import base64
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -9,6 +11,8 @@ import unittest
 from pathlib import Path
 
 import yaml
+from ansible.parsing.dataloader import DataLoader
+from ansible.template import Templar
 
 ROOT = Path(__file__).resolve().parents[2]
 ROLE = ROOT / "roles/postgres_backup_restore"
@@ -113,3 +117,57 @@ class WorkerAdmissionPreflightTests(unittest.TestCase):
                 )
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(calls, [])
+
+
+class WorkerAdmissionNativeRowTests(unittest.TestCase):
+    def test_active_database_rows_bind_exact_path_size_and_digest(self):
+        worker = "/usr/local/libexec/postgres-backup-keycloak.py"
+        values = {
+            "postgres_backup_restore_schedule_worker": worker,
+            "postgres_backup_restore_worker_payload": {"stat": {"size": 20781, "checksum": "a" * 64}},
+            "postgres_backup_restore_fapolicyd_state": {"rc": 0},
+            "postgres_backup_restore_schedule_fapolicyd_trust_file": "/etc/fapolicyd/trust.d/fixture",
+        }
+        tasks = yaml.safe_load(TASKS.read_text())
+        binding = next(task for task in tasks if task["name"].startswith("Bind the requested admission"))
+        rendered = Templar(loader=DataLoader(), variables=values).template(binding["ansible.builtin.set_fact"])
+        pattern = rendered["postgres_backup_restore_fapolicyd_expected_pattern"]
+        self.assertIsNotNone(re.match(pattern, f"filedb {worker} 20781 {'a' * 64}"))
+        for line in (
+            f"filedb {worker}.other 20781 {'a' * 64}",
+            f"filedb {worker} 20780 {'a' * 64}",
+            f"filedb {worker} 20781 {'b' * 64}",
+        ):
+            with self.subTest(line=line):
+                self.assertIsNone(re.match(pattern, line))
+
+    def test_restored_admission_accepts_a_commented_single_file_declaration(self):
+        worker = "/usr/local/libexec/postgres-backup-keycloak.py"
+        declaration = f"# retained comment\n{worker} 20700 {'b' * 64}\n"
+        tasks = yaml.safe_load((ROLE / "tasks/schedule_worker.yml").read_text())
+        verification = next(
+            task for task in tasks[1]["rescue"] if task["name"].startswith("Verify the restored dedicated")
+        )
+        values = {
+            "postgres_backup_restore_previous_trust_bytes": {
+                "content": base64.b64encode(declaration.encode()).decode()
+            },
+        }
+        values.update(verification["vars"])
+        rendered = Templar(loader=DataLoader(), variables=values).template(verification["vars"])
+        pattern = rendered["postgres_backup_restore_fapolicyd_restore_pattern"]
+        self.assertIsNotNone(re.match(pattern, f"filedb {worker} 20700 {'b' * 64}"))
+        self.assertIsNone(re.match(pattern, f"filedb {worker} 20700 {'a' * 64}"))
+
+    def test_declared_trust_file_has_one_native_row_and_a_real_final_newline(self):
+        worker = "/usr/local/libexec/postgres-backup-keycloak.py"
+        tasks = yaml.safe_load((ROLE / "tasks/schedule_worker.yml").read_text())
+        declaration = next(task for task in tasks[1]["block"] if task["name"].startswith("Write only"))
+        values = {
+            "postgres_backup_restore_schedule_worker": worker,
+            "postgres_backup_restore_worker_payload": {"stat": {"size": 20781, "checksum": "a" * 64}},
+        }
+        rendered = Templar(loader=DataLoader(), variables=values).template(
+            declaration["ansible.builtin.copy"]["content"]
+        )
+        self.assertEqual(rendered, f"{worker} 20781 {'a' * 64}\n")

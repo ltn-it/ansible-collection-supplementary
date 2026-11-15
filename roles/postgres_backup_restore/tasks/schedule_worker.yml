@@ -43,9 +43,9 @@
 
     - name: Write only the explicitly approved worker trust declaration
       ansible.builtin.copy:
-        content: >-
+        content: >
           {{ postgres_backup_restore_schedule_worker }} {{ postgres_backup_restore_worker_payload.stat.size }}
-          {{ postgres_backup_restore_worker_payload.stat.checksum }}{{ '\n' }}
+          {{ postgres_backup_restore_worker_payload.stat.checksum }}
         dest: "{{ postgres_backup_restore_schedule_fapolicyd_trust_file }}"
         owner: root
         group: root
@@ -151,10 +151,10 @@
       vars:
         postgres_backup_restore_fapolicyd_previous_rows: >-
           {{ (postgres_backup_restore_previous_trust_bytes.content | default('') | b64decode).splitlines()
-             | reject('match', '^\\s*(#.*)?$') | list }}
+             | reject('match', '^\s*(#.*)?$') | list }}
         postgres_backup_restore_fapolicyd_restore_pattern: >-
           ^\S+\s+{{ (postgres_backup_restore_fapolicyd_previous_rows | first | default('')).split()
-          | map('regex_escape') | join('\\s+') }}\s*\Z
+          | map('regex_escape') | join('\s+') }}\s*\Z
       when: postgres_backup_restore_fapolicyd_requested | bool
       no_log: true
 
