@@ -62,10 +62,15 @@ and `container_name` inputs. All scheduling inputs have the full
   are rejected before configuring a schedule.
 
 The scheduled service invokes the existing shared worker directly. It neither
-installs nor invokes a component-log helper. Standard output/error currently
-use the system journal. Component-wide RPM retention and backup/restore
-operational-file integration remain separate consumer integration requirements;
-the journal setting does not prove those limits. `KillMode=control-group`
+installs nor invokes a component-log helper. With the default empty
+`postgres_backup_restore_operations_log_file`, standard output/error use the
+system journal. An explicit absolute operational log path prepares a protected
+file and configures the service with `StandardOutput=append:` and
+`StandardError=inherit`. Manual backup/restore operations with the same input
+also append diagnostics to this file while keeping database payloads separate.
+RPM rotation and component-wide retention remain the caller's responsibility;
+selecting an output destination does not establish retention limits.
+`KillMode=control-group`
 contains worker descendants when stopping the service. Never route a database
 dump stream or restored SQL into an operational log.
 
@@ -120,9 +125,11 @@ with `CRON_TZ` support. It installs an instance-specific root-owned file under
 removes that cron file before enabling the timer. Cron does not catch up missed
 runs after downtime; monitor the worker's snapshot age with `--status`.
 The cron trigger starts the user service and sends no cron email. Without an
-explicit log policy, worker diagnostics go to the existing journal. With capture
-enabled they go to the shared component log; only service/collector diagnostics
-remain in the platform journal. This role does not set a journal retention quota.
+explicit operational log path, worker diagnostics go to the existing journal.
+With `postgres_backup_restore_operations_log_file` set, they append directly to
+the protected operational file. There is no logging collector; systemd's own
+service diagnostics remain in the platform journal. This role does not set a
+journal retention quota.
 External backup and monitoring integration remain separate consumers.
 
 ## Example Playbook

@@ -19,8 +19,12 @@ them to `keycloak_deploy_truststore_dir` and mounts this directory read-only at
 Keycloak loads this directory at startup. TLS and hostname verification remain
 enabled. Private keys are rejected. An empty list preserves the previous manifest.
 The prepared runtime account needs ownership of the destination directory and
-OpenSSL on the managed host. Podman owns SELinux volume relabeling; do not disable
-SELinux. Removing previously copied CA files is deliberately not automatic.
+OpenSSL on the managed host. On SELinux-enforcing hosts, the caller must prepare
+the destination directory and certificates with container-readable labels such
+as `container_file_t`, including newly copied files. This role does not manage
+SELinux file contexts, and Podman kube play does not relabel existing hostPath
+bind mounts. Keep SELinux enforcing; see the rootless prerequisites below.
+Removing previously copied CA files is deliberately not automatic.
 
 For an existing rootless installation, the `rootless-truststore-update` task
 entrypoint validates that the rendered manifest differs only by the truststore
