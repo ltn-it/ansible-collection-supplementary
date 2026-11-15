@@ -1,0 +1,8 @@
+---
+bugfixes:
+  - >-
+    postgres_backup_restore - pin expired scheduled-set directories and unlink
+    only verified set files so concurrent renames cannot redirect retention.
+  - >-
+    postgres_backup_restore - record the loaded worker identity instead of
+    hashing a possibly replaced worker pathname when publishing a manifest.

@@ -8,7 +8,6 @@ import json
 import os
 import re
 import selectors
-import shutil
 import stat
 import subprocess
 import sys
@@ -16,6 +15,9 @@ import time
 import uuid
 from pathlib import Path
 
+# Bind the source observation to the code Python actually loaded, even if an
+# installer replaces the pathname while this process imports or runs.
+MODULE_CODE = sys._getframe().f_code
 SCHEMA = "lit.postgres_backup_restore/v1"
 SET_ID = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{12}$")
 IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]{0,62}$")
@@ -72,6 +74,24 @@ def digest(path):
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             result.update(block)
     return result.hexdigest()
+
+
+def running_worker_digest():
+    try:
+        source = Path(__file__).read_bytes()
+        require(compile(source, __file__, "exec", dont_inherit=True) == MODULE_CODE, "worker_source_changed")
+    except Exception:
+        raise Failure("worker_source_changed") from None
+    return hashlib.sha256(source).hexdigest()
+
+
+try:
+    WORKER_SHA256 = running_worker_digest()
+except Failure:
+    if __name__ == "__main__":
+        print("BACKUP_FAILED; worker source changed during startup", file=sys.stderr)
+        sys.exit(2)
+    raise
 
 
 def private_file(path, owners):
@@ -328,6 +348,11 @@ def checked_manifest(directory, config, expected_id=None):
     require(not directory.is_symlink() and directory.is_dir(), "set_directory")
     metadata = directory.stat()
     require(metadata.st_uid == config["uid"] and stat.S_IMODE(metadata.st_mode) == 0o700, "set_permissions")
+    return checked_manifest_contents(directory, config, set_id)
+
+
+def checked_manifest_contents(directory, config, set_id):
+    """Check files below a validated directory, including a pinned directory FD."""
     require({path.name for path in directory.iterdir()} == FILES, "set_files")
     for name in FILES:
         info = private_file(directory / name, {config["uid"]})
@@ -362,7 +387,6 @@ def verify_set(directory, config, expected_id=None):
 
 
 def prune(root, config, now, keep):
-    require(shutil.rmtree.avoids_symlink_attacks, "retention_platform")
     cutoff = now - datetime.timedelta(days=config["retention_days"])
     removed = 0
     for directory in root.iterdir():
@@ -376,11 +400,37 @@ def prune(root, config, now, keep):
             # Foreign, modified or malformed material is never a deletion candidate.
             continue
         if scheduled and expired:
+            descriptor = None
             try:
-                require(verify_set(directory, config) == manifest, "retention_manifest_changed")
-            except (Failure, OSError, ValueError, KeyError, TypeError):
-                continue
-            shutil.rmtree(directory)
+                try:
+                    descriptor = os.open(str(directory), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                    metadata = os.fstat(descriptor)
+                    require(
+                        metadata.st_uid == config["uid"] and stat.S_IMODE(metadata.st_mode) == 0o700,
+                        "set_permissions",
+                    )
+                    # Resolve every read and unlink below the same open directory.
+                    # A concurrent rename cannot redirect deletion into its replacement.
+                    pinned = Path("/proc/self/fd") / str(descriptor)
+                    current, checksums = checked_manifest_contents(pinned, config, directory.name)
+                    require(current == manifest, "retention_manifest_changed")
+                    require(all(digest(pinned / name) == value for name, value in checksums.items()), "checksum")
+                except (Failure, OSError, ValueError, KeyError, TypeError):
+                    continue
+                for name in sorted(FILES):
+                    os.unlink(name, dir_fd=descriptor)
+                os.fsync(descriptor)
+                # Never recursively remove the pathname: it may now name a different
+                # set. rmdir can remove only an empty directory, preserving new files.
+                try:
+                    current_metadata = directory.lstat()
+                    if (current_metadata.st_dev, current_metadata.st_ino) == (metadata.st_dev, metadata.st_ino):
+                        directory.rmdir()
+                except FileNotFoundError:
+                    pass
+            finally:
+                if descriptor is not None:
+                    os.close(descriptor)
             removed += 1
     fsync_directory(root)
     return removed
@@ -443,7 +493,7 @@ def create_set(root, config, kind):
         "source_revision": config["source_revision"],
         "image": config["image"],
         "pg_dump_version": version,
-        "worker_sha256": digest(Path(__file__)),
+        "worker_sha256": WORKER_SHA256,
     }
     write_bytes(staging / "manifest.json", (json.dumps(manifest, sort_keys=True) + "\n").encode())
     sums = "".join(

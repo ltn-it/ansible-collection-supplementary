@@ -84,6 +84,15 @@ and symlinks are preserved. Manual runs never trigger pruning. A concurrent
 run returns exit 75 without altering the active operation.
 Retention inspects checked manifest metadata first and hashes payloads only for
 expired scheduled deletion candidates, immediately before removal.
+Deletion pins the validated directory with an open Linux directory descriptor and
+unlinks only the four known set files relative to that descriptor. Replacing the
+original pathname cannot redirect cleanup into another set; newly added unknown
+material is never recursively removed. Concurrent changes can leave an empty
+renamed directory for an operator to remove. `/proc/self/fd` must be available.
+The manifest records the worker digest captured at startup after matching the
+observed source to Python's loaded module code. A later atomic worker replacement
+does not change the running operation's recorded implementation identity; an
+incompatible replacement during startup fails before backup work begins.
 Numeric schedule limits accept integers or decimal integer strings; booleans,
 fractions and malformed text are rejected before template conversion.
 The same guard includes the runtime UID and socket port. UID-derived service and

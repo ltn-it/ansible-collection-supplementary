@@ -264,9 +264,80 @@ class ScheduledBackupTests(unittest.TestCase):
         hashed = [call.args[0] for call in invoked.call_args_list]
         self.assertNotIn(recent / "database.dump", hashed)
         self.assertNotIn(manual / "database.dump", hashed)
-        self.assertIn(expired / "database.dump", hashed)
+        self.assertEqual(sum(path.name == "database.dump" for path in hashed), 1)
+        self.assertTrue(any(str(path).startswith("/proc/self/fd/") for path in hashed))
         self.assertTrue(recent.exists() and manual.exists())
         self.assertFalse(expired.exists())
+
+    def test_retention_never_deletes_a_manual_set_replacing_the_verified_directory(self):
+        expired = self.old_set("c" * 12)
+        replacement = self.root / "replacement" / expired.name
+        replacement.mkdir(parents=True, mode=0o700)
+        for name in WORKER.FILES:
+            WORKER.write_bytes(replacement / name, (expired / name).read_bytes())
+        manifest = json.loads((replacement / "manifest.json").read_text())
+        manifest["kind"] = "manual"
+        (replacement / "manifest.json").write_text(json.dumps(manifest))
+        (replacement / "SHA256SUMS").write_text(
+            "".join(
+                WORKER.digest(replacement / name) + "  " + name + "\n"
+                for name in ("database.dump", "roles.sql", "manifest.json")
+            )
+        )
+        retained = self.root / "renamed-expired"
+        unlink = os.unlink
+
+        def exchange_before_first_unlink(name, *, dir_fd):
+            if not retained.exists():
+                expired.rename(retained)
+                replacement.rename(expired)
+            return unlink(name, dir_fd=dir_fd)
+
+        with mock.patch.object(WORKER.os, "unlink", side_effect=exchange_before_first_unlink):
+            self.assertEqual(WORKER.prune(self.backups, self.config, WORKER.utc_now(), ""), 1)
+        self.assertEqual(WORKER.verify_set(expired, self.config)["kind"], "manual")
+        self.assertEqual(list(retained.iterdir()), [])
+
+    def test_retention_does_not_recurse_into_material_added_after_verification(self):
+        expired = self.old_set("c" * 12)
+        unlink = os.unlink
+
+        def add_foreign_directory(name, *, dir_fd):
+            foreign = expired / "operator-material"
+            if not foreign.exists():
+                foreign.mkdir()
+                (foreign / "preserve").write_bytes(b"operator bytes")
+            return unlink(name, dir_fd=dir_fd)
+
+        with mock.patch.object(WORKER.os, "unlink", side_effect=add_foreign_directory):
+            with self.assertRaises(OSError):
+                WORKER.prune(self.backups, self.config, WORKER.utc_now(), "")
+        self.assertEqual((expired / "operator-material/preserve").read_bytes(), b"operator bytes")
+
+    def test_manifest_keeps_loaded_worker_identity_after_atomic_replacement(self):
+        worker = self.root / "worker.py"
+        worker.write_bytes(SOURCE.read_bytes())
+        previous = self.fake.client
+
+        def replace_worker(commands, arguments, category, *args, **kwargs):
+            if category == "version":
+                pending = self.root / "next-worker.py"
+                pending.write_bytes(b"replacement worker bytes")
+                pending.replace(worker)
+            return previous(commands, arguments, category, *args, **kwargs)
+
+        with mock.patch.object(WORKER, "__file__", str(worker)), mock.patch.object(self.fake, "client", replace_worker):
+            self.assertEqual(self.run_backup(), 0)
+        manifest = json.loads((self.completed()[0] / "manifest.json").read_text())
+        self.assertEqual(manifest["worker_sha256"], WORKER.digest(SOURCE))
+        self.assertNotEqual(manifest["worker_sha256"], WORKER.digest(worker))
+
+    def test_initial_identity_rejects_source_that_does_not_match_loaded_code(self):
+        worker = self.root / "different-worker.py"
+        worker.write_text("raise RuntimeError('different implementation')\n")
+        with mock.patch.object(WORKER, "__file__", str(worker)):
+            with self.assertRaisesRegex(WORKER.Failure, "worker_source_changed"):
+                WORKER.running_worker_digest()
 
     def test_interrupted_worker_is_unhealthy_despite_a_recent_success(self):
         self.run_backup()
