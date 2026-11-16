@@ -4,7 +4,10 @@
   tags: always
 
 - name: Manage scheduled PostgreSQL backups
-  ansible.builtin.include_tasks: schedule.yml
+  ansible.builtin.include_tasks:
+    file: schedule.yml
+    apply:
+      tags: [backup, schedule]
   when:
     - postgres_backup_restore_action == 'schedule'
     - postgres_backup_restore_execute | bool
@@ -21,7 +24,10 @@
     - restore
 
 - name: Prepare explicit operational logging for manual database operations
-  ansible.builtin.include_tasks: schedule_output.yml
+  ansible.builtin.include_tasks:
+    file: schedule_output.yml
+    apply:
+      tags: [backup, restore]
   when:
     - postgres_backup_restore_execute | bool
     - postgres_backup_restore_action in ['backup', 'restore']
@@ -90,7 +96,10 @@
     - restore
 
 - name: Run a manual database operation with protected direct output
-  ansible.builtin.include_tasks: logged_operation.yml
+  ansible.builtin.include_tasks:
+    file: logged_operation.yml
+    apply:
+      tags: [backup, restore]
   when:
     - postgres_backup_restore_execute | bool
     - postgres_backup_restore_action in ['backup', 'restore']

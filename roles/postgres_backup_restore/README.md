@@ -70,6 +70,9 @@ file and configures the service with `StandardOutput=append:` and
 also append diagnostics to this file while keeping database payloads separate.
 RPM rotation and component-wide retention remain the caller's responsibility;
 selecting an output destination does not establish retention limits.
+With an otherwise untagged role invocation, `--tags backup`, `--tags restore`
+and `--tags schedule` also select their included operation, output preparation
+and schedule-management tasks. A failed manual backup stops before pruning.
 `KillMode=control-group`
 contains worker descendants when stopping the service. Never route a database
 dump stream or restored SQL into an operational log.
