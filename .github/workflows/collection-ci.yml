@@ -901,7 +901,7 @@ jobs:
   g06-operating-failure:
     name: G06 operating failure
     # Retain every recorded predecessor, including the failed-with-effects
-    # 8926 execution. Root independently proves cleanup, custody and continuity.
+    # 8926 and post-publication 086d executions. Root proves custody and cleanup.
     if: >-
       github.repository == 'ltn-it/ansible-collection-supplementary' &&
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
@@ -910,7 +910,8 @@ jobs:
        github.event.before == 'f27c1d4edff75377f285275cec9bfec6bc3081f6' ||
        github.event.before == '3d84e26d90cc778fb8c4f462ce481584da57fb5a' ||
        github.event.before == 'f138a227d9eee41ea698b1a6f3b9a05f7ae3e18d' ||
-       github.event.before == '8926e7f535f158d4af89e4ac68149ff0b8ab740d') &&
+       github.event.before == '8926e7f535f158d4af89e4ac68149ff0b8ab740d' ||
+       github.event.before == '086d039c8c58bc91edfeacadf508c207a03a58b5') &&
       github.run_attempt == 1 &&
       ((github.actor == 'litroc' && github.actor_id == '76040632') ||
        (github.actor == 'litdeg' && github.actor_id == '247824904')) &&
@@ -932,7 +933,7 @@ jobs:
   g06-operating-broker-cancel:
     name: G06 operating broker cancel
     # Retain every recorded predecessor, including the failed-with-effects
-    # 8926 execution. Root independently proves cleanup, custody and continuity.
+    # 8926 and post-publication 086d executions. Root proves custody and cleanup.
     if: >-
       github.repository == 'ltn-it/ansible-collection-supplementary' &&
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
@@ -941,7 +942,8 @@ jobs:
        github.event.before == 'f27c1d4edff75377f285275cec9bfec6bc3081f6' ||
        github.event.before == '3d84e26d90cc778fb8c4f462ce481584da57fb5a' ||
        github.event.before == 'f138a227d9eee41ea698b1a6f3b9a05f7ae3e18d' ||
-       github.event.before == '8926e7f535f158d4af89e4ac68149ff0b8ab740d') &&
+       github.event.before == '8926e7f535f158d4af89e4ac68149ff0b8ab740d' ||
+       github.event.before == '086d039c8c58bc91edfeacadf508c207a03a58b5') &&
       github.run_attempt == 1 &&
       ((github.actor == 'litroc' && github.actor_id == '76040632') ||
        (github.actor == 'litdeg' && github.actor_id == '247824904')) &&
@@ -963,7 +965,7 @@ jobs:
   g06-operating-expiry-controller-loss:
     name: G06 operating expiry
     # Retain every recorded predecessor, including the failed-with-effects
-    # 8926 execution. Root independently proves cleanup, custody and continuity.
+    # 8926 and post-publication 086d executions. Root proves custody and cleanup.
     if: >-
       github.repository == 'ltn-it/ansible-collection-supplementary' &&
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
@@ -972,7 +974,8 @@ jobs:
        github.event.before == 'f27c1d4edff75377f285275cec9bfec6bc3081f6' ||
        github.event.before == '3d84e26d90cc778fb8c4f462ce481584da57fb5a' ||
        github.event.before == 'f138a227d9eee41ea698b1a6f3b9a05f7ae3e18d' ||
-       github.event.before == '8926e7f535f158d4af89e4ac68149ff0b8ab740d') &&
+       github.event.before == '8926e7f535f158d4af89e4ac68149ff0b8ab740d' ||
+       github.event.before == '086d039c8c58bc91edfeacadf508c207a03a58b5') &&
       github.run_attempt == 1 &&
       ((github.actor == 'litroc' && github.actor_id == '76040632') ||
        (github.actor == 'litdeg' && github.actor_id == '247824904')) &&
