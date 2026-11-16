@@ -4,3 +4,6 @@ bugfixes:
     collection quality - retain the failed post-publication preparation as an explicit
     operating predecessor, while Root independently verifies its original custody,
     cleanup, and complete historical continuity before admitting the next execution.
+  - >-
+    collection quality - bind every delegated controller reference to the published
+    Validation revision that admits the same operating predecessor before scheduling.
