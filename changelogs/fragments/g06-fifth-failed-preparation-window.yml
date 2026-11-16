@@ -1,0 +1,9 @@
+---
+bugfixes:
+  - >-
+    G06 operating windows - admit the exact functional successor of the failed
+    8926 Main execution with preparation effects, preserving every historical
+    predecessor, original attempt requirement, and matching actor identity.
+    Original cleanup and custody remain independent Root admission requirements.
+    The reusable validation workflow and evidence provenance now bind its
+    normally published Validation Main successor.
