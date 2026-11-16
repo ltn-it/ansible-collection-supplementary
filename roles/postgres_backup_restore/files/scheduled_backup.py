@@ -396,8 +396,10 @@ def prune(root, config, now, keep):
             manifest, _checksums = checked_manifest(directory, config)
             expired = parse_stamp(manifest["snapshot_utc"]) < cutoff
             scheduled = manifest["kind"] == "scheduled"
-        except (Failure, OSError, ValueError, KeyError, TypeError):
+        except (Failure, FileNotFoundError, NotADirectoryError, ValueError, KeyError, TypeError):
             # Foreign, modified or malformed material is never a deletion candidate.
+            # Unexpected storage/access failures must fail the run, not look like
+            # successful retention. A vanished/replaced path remains untouched.
             continue
         if scheduled and expired:
             descriptor = None
@@ -415,7 +417,7 @@ def prune(root, config, now, keep):
                     current, checksums = checked_manifest_contents(pinned, config, directory.name)
                     require(current == manifest, "retention_manifest_changed")
                     require(all(digest(pinned / name) == value for name, value in checksums.items()), "checksum")
-                except (Failure, OSError, ValueError, KeyError, TypeError):
+                except (Failure, FileNotFoundError, NotADirectoryError, ValueError, KeyError, TypeError):
                     continue
                 for name in sorted(FILES):
                     os.unlink(name, dir_fd=descriptor)

@@ -82,13 +82,17 @@ are normalized for comparison; the stored SQL remains unchanged. No fixed
 source; the role export does not contain password material.
 
 Archive and set checksums are verified before atomic directory publication.
-A `.partial` directory is never a ready backup. Failed attempts never prune old
+A `.partial` directory is never a ready backup. Failed dump/publication attempts never prune old
 sets. Only valid expired `scheduled` sets belonging to this instance/database
 are eligible for retention. Manual restore points, unknown/modified material
 and symlinks are preserved. Manual runs never trigger pruning. A concurrent
 run returns exit 75 without altering the active operation.
 Retention inspects checked manifest metadata first and hashes payloads only for
 expired scheduled deletion candidates, immediately before removal.
+Unexpected storage or access errors during retention fail the run and set
+`last-run.json` to `failed`, even when the newly published backup is valid.
+Vanished or concurrently replaced candidate paths are skipped without deletion;
+malformed, modified and foreign material remains preserved.
 Deletion pins the validated directory with an open Linux directory descriptor and
 unlinks only the four known set files relative to that descriptor. Replacing the
 original pathname cannot redirect cleanup into another set; newly added unknown

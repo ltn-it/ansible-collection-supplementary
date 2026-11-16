@@ -1,6 +1,7 @@
 """Filesystem and failure-path tests; real Podman/systemd acceptance is separate."""
 
 import contextlib
+import errno
 import fcntl
 import importlib.util
 import io
@@ -268,6 +269,42 @@ class ScheduledBackupTests(unittest.TestCase):
         self.assertTrue(any(str(path).startswith("/proc/self/fd/") for path in hashed))
         self.assertTrue(recent.exists() and manual.exists())
         self.assertFalse(expired.exists())
+
+    def test_retention_storage_errors_fail_the_run_and_preserve_the_candidate(self):
+        old = self.old_set("e" * 12)
+        original = WORKER.checked_manifest_contents
+        for pinned in (False, True):
+            for error_number in (errno.EIO, errno.EACCES):
+                with self.subTest(pinned=pinned, errno=error_number):
+
+                    def fail_old_candidate(directory, config, set_id, *, pinned=pinned, error_number=error_number):
+                        if set_id == old.name and str(directory).startswith("/proc/self/fd/") == pinned:
+                            raise OSError(error_number, "synthetic storage failure")
+                        return original(directory, config, set_id)
+
+                    with mock.patch.object(WORKER, "checked_manifest_contents", side_effect=fail_old_candidate):
+                        with self.assertRaises(OSError) as caught:
+                            self.run_backup()
+                    self.assertEqual(caught.exception.errno, error_number)
+                    self.assertTrue(old.is_dir())
+                    self.assertEqual(WORKER.verify_set(old, self.config)["kind"], "scheduled")
+                    self.assertEqual(json.loads((self.backups / "last-run.json").read_text())["status"], "failed")
+
+    def test_retention_preserves_candidates_replaced_during_validation(self):
+        old = self.old_set("f" * 12)
+        original = WORKER.checked_manifest_contents
+        for pinned in (False, True):
+            for error_type in (FileNotFoundError, NotADirectoryError):
+                with self.subTest(pinned=pinned, error=error_type.__name__):
+
+                    def replace_old_candidate(directory, config, set_id, *, pinned=pinned, error_type=error_type):
+                        if set_id == old.name and str(directory).startswith("/proc/self/fd/") == pinned:
+                            raise error_type("synthetic concurrent path replacement")
+                        return original(directory, config, set_id)
+
+                    with mock.patch.object(WORKER, "checked_manifest_contents", side_effect=replace_old_candidate):
+                        self.assertEqual(WORKER.prune(self.backups, self.config, WORKER.utc_now(), ""), 0)
+                    self.assertEqual(WORKER.verify_set(old, self.config)["kind"], "scheduled")
 
     def test_retention_never_deletes_a_manual_set_replacing_the_verified_directory(self):
         expired = self.old_set("c" * 12)
