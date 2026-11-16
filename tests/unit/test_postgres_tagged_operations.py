@@ -17,15 +17,19 @@ ROLE = Path(__file__).resolve().parents[2] / "roles/postgres_backup_restore"
 
 
 class TaggedOperationTests(unittest.TestCase):
-    def execute(self, action, tag, fail_operation=False, selected=True, logged=True, existing_destination=False):
+    def execute(
+        self, action, tag, fail_operation=False, selected=True, logged=True, existing_destination=False, skip_tag=None
+    ):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             destination = root / "unexpected-output" if not selected and action == "backup" else root
             if existing_destination:
                 destination.mkdir(mode=0o755)
             backup = destination / "postgres-new.dump"
-            older, newer = root / "postgres-old.dump", root / "postgres-current.dump"
-            for number, path in enumerate((older, newer), 1):
+            oldest, older, newer = (
+                root / name for name in ("postgres-oldest.dump", "postgres-old.dump", "postgres-current.dump")
+            )
+            for number, path in enumerate((oldest, older, newer)):
                 path.write_text("protected-old-backup")
                 os.utime(path, (number, number))
             preparation, operation, schedule = (root / name for name in ("prepared", "operated", "scheduled"))
@@ -107,7 +111,8 @@ class TaggedOperationTests(unittest.TestCase):
             executable = shutil.which("ansible-playbook")
             self.assertIsNotNone(executable)
             result = subprocess.run(  # noqa: S603 -- trusted Ansible and owned temporary fixture.
-                [executable, "-i", "localhost,", str(play), "--tags", tag],
+                [executable, "-i", "localhost,", str(play), "--tags", tag]
+                + (["--skip-tags", skip_tag] if skip_tag else []),
                 capture_output=True,
                 text=True,
                 check=False,
@@ -115,6 +120,12 @@ class TaggedOperationTests(unittest.TestCase):
                 env=dict(os.environ, ANSIBLE_LOCAL_TEMP=str(root / "local")),
             )
             self.assertEqual(result.returncode, 2 if fail_operation else 0, result.stdout + result.stderr)
+            if skip_tag and action == "backup":
+                self.assertEqual(
+                    dict(replacement_created=backup.exists(), oldest_preserved=oldest.exists()),
+                    dict(replacement_created=True, oldest_preserved=False),
+                    "Selected backup must create its replacement before retention, even when restore is excluded",
+                )
             if not selected:
                 observed = dict(
                     destination_exists=destination.exists() if destination != root else False,
@@ -126,6 +137,7 @@ class TaggedOperationTests(unittest.TestCase):
                     backup_executed=backup.exists(),
                     scheduler_changed=schedule.exists(),
                     old_backup_preserved=older.exists(),
+                    oldest_backup_preserved=oldest.exists(),
                 )
                 self.assertEqual(
                     observed,
@@ -137,6 +149,7 @@ class TaggedOperationTests(unittest.TestCase):
                         backup_executed=False,
                         scheduler_changed=False,
                         old_backup_preserved=True,
+                        oldest_backup_preserved=True,
                     ),
                     "Wrong action selection must not prepare, execute or prune",
                 )
@@ -148,6 +161,7 @@ class TaggedOperationTests(unittest.TestCase):
                 if fail_operation:
                     self.assertFalse(backup.exists())
                     self.assertTrue(older.exists(), "Failed backup must not prune prior sets")
+                    self.assertTrue(oldest.exists(), "Failed backup must preserve the oldest set too")
                 elif action == "backup":
                     self.assertEqual(backup.read_text(), "replacement")
                     self.assertFalse(older.exists())
@@ -183,3 +197,9 @@ class TaggedOperationTests(unittest.TestCase):
         for logged in (True, False):
             with self.subTest(logged=logged):
                 self.execute("backup", "restore", selected=False, logged=logged, existing_destination=True)
+
+    def test_selected_backup_runs_before_pruning_when_restore_tag_is_excluded(self):
+        self.execute("backup", "backup", skip_tag="restore")
+
+    def test_selected_restore_runs_when_backup_tag_is_excluded(self):
+        self.execute("restore", "restore", skip_tag="backup")

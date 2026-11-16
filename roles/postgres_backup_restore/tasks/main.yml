@@ -32,7 +32,7 @@
     - postgres_backup_restore_execute | bool
     - postgres_backup_restore_action in ['backup', 'restore']
     - postgres_backup_restore_operations_log_file | length > 0
-  tags: [backup, restore]
+  tags: ["{{ postgres_backup_restore_action }}"]
 
 - name: Inspect an existing manual backup destination directory before selecting its owner
   ansible.builtin.stat:
@@ -102,7 +102,7 @@
     - postgres_backup_restore_execute | bool
     - postgres_backup_restore_action in ['backup', 'restore']
     - postgres_backup_restore_operations_log_file | length > 0
-  tags: [backup, restore]
+  tags: ["{{ postgres_backup_restore_action }}"]
 
 - name: Run PostgreSQL backup
   ansible.builtin.command:

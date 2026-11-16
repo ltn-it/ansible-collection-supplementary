@@ -82,6 +82,10 @@ A manual operation and its output preparation inherit only the configured
 restore, and `--tags restore` does not execute a configured backup or its pruning.
 Backup directory creation and permission changes are also selected only by the
 backup tag, including when operational output remains in the journal.
+The manual includes and their children use the same action tag. A selected
+backup still executes with `--skip-tags restore`, and a selected restore still
+executes with `--skip-tags backup`; excluding the other action cannot suppress
+the operation while leaving backup pruning selected.
 
 Scheduled sets contain the entire selected database, role definitions **without
 passwords**, an immutable manifest and SHA-256 checksums. Role definitions are

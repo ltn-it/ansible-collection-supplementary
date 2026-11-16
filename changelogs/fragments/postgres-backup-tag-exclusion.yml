@@ -1,0 +1,6 @@
+---
+bugfixes:
+  - >-
+    postgres_backup_restore - give manual include tasks the same configured action tag as their children,
+    so excluding restore cannot suppress a selected backup while leaving pruning enabled,
+    and excluding backup cannot suppress a selected restore.
