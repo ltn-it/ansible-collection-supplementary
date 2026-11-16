@@ -17,10 +17,13 @@ ROLE = Path(__file__).resolve().parents[2] / "roles/postgres_backup_restore"
 
 
 class TaggedOperationTests(unittest.TestCase):
-    def execute(self, action, tag, fail_operation=False, selected=True):
+    def execute(self, action, tag, fail_operation=False, selected=True, logged=True, existing_destination=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            backup = root / "postgres-new.dump"
+            destination = root / "unexpected-output" if not selected and action == "backup" else root
+            if existing_destination:
+                destination.mkdir(mode=0o755)
+            backup = destination / "postgres-new.dump"
             older, newer = root / "postgres-old.dump", root / "postgres-current.dump"
             for number, path in enumerate((older, newer), 1):
                 path.write_text("protected-old-backup")
@@ -71,13 +74,17 @@ class TaggedOperationTests(unittest.TestCase):
             tasks = [
                 task
                 for task in main
-                if "ansible.builtin.include_tasks" in task or task["name"] == "Prune old PostgreSQL backups"
+                if "ansible.builtin.include_tasks" in task
+                or task["name"] in ["Prune old PostgreSQL backups", "Ensure PostgreSQL backup directory exists"]
             ]
             values = dict(
                 postgres_backup_restore_action=action,
                 postgres_backup_restore_execute=True,
                 postgres_backup_restore_restore_confirm="YES_RESTORE",
-                postgres_backup_restore_operations_log_file="explicit-fixture-log",
+                postgres_backup_restore_operations_log_file="explicit-fixture-log" if logged else "",
+                postgres_backup_restore_schedule_uid=os.geteuid(),
+                postgres_backup_restore_schedule_user=str(os.geteuid()),
+                postgres_backup_restore_schedule_group=str(os.getegid()),
                 postgres_backup_restore_file=str(backup),
                 postgres_backup_restore_backup_dir=str(root),
                 postgres_backup_restore_retention_keep_last=2,
@@ -110,6 +117,10 @@ class TaggedOperationTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2 if fail_operation else 0, result.stdout + result.stderr)
             if not selected:
                 observed = dict(
+                    destination_exists=destination.exists() if destination != root else False,
+                    destination_mode=(
+                        (destination.stat().st_mode & 0o777) if destination != root and destination.exists() else None
+                    ),
                     prepared=preparation.exists(),
                     confirmed_restore_executed=operation.exists(),
                     backup_executed=backup.exists(),
@@ -119,6 +130,8 @@ class TaggedOperationTests(unittest.TestCase):
                 self.assertEqual(
                     observed,
                     dict(
+                        destination_exists=existing_destination,
+                        destination_mode=0o755 if existing_destination else None,
                         prepared=False,
                         confirmed_restore_executed=False,
                         backup_executed=False,
@@ -162,3 +175,11 @@ class TaggedOperationTests(unittest.TestCase):
 
     def test_restore_tag_does_not_execute_logged_backup_or_pruning(self):
         self.execute("backup", "restore", selected=False)
+
+    def test_restore_tag_does_not_create_unlogged_backup_directory(self):
+        self.execute("backup", "restore", selected=False, logged=False)
+
+    def test_restore_tag_preserves_existing_backup_directory_mode(self):
+        for logged in (True, False):
+            with self.subTest(logged=logged):
+                self.execute("backup", "restore", selected=False, logged=logged, existing_destination=True)

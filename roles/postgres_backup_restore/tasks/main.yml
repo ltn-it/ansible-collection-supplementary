@@ -79,9 +79,7 @@
   when:
     - postgres_backup_restore_action == 'backup'
     - postgres_backup_restore_execute | bool
-  tags:
-    - backup
-    - restore
+  tags: backup
 
 - name: Report PostgreSQL backup/restore dry run
   ansible.builtin.debug:

@@ -80,6 +80,8 @@ dump stream or restored SQL into an operational log.
 A manual operation and its output preparation inherit only the configured
 `postgres_backup_restore_action` tag: `--tags backup` does not execute a configured
 restore, and `--tags restore` does not execute a configured backup or its pruning.
+Backup directory creation and permission changes are also selected only by the
+backup tag, including when operational output remains in the journal.
 
 Scheduled sets contain the entire selected database, role definitions **without
 passwords**, an immutable manifest and SHA-256 checksums. Role definitions are
