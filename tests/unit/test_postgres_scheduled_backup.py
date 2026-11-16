@@ -153,6 +153,31 @@ class ScheduledBackupTests(unittest.TestCase):
         self.assertTrue(manual.is_dir() and changed.is_dir() and foreign.is_dir())
         self.assertTrue(linked.is_symlink() and self.data.is_dir())
 
+    def test_retention_preserves_a_manual_set_with_ambiguous_kind(self):
+        manual = self.old_set("d" * 12, "manual")
+        manifest = manual / "manifest.json"
+        text = manifest.read_text()
+        self.assertEqual(text.count('"kind": "manual"'), 1)
+        manifest.write_text(text.replace('"kind": "manual"', '"kind": "manual", "kind": "scheduled"'))
+        (manual / "SHA256SUMS").write_text(
+            "".join(
+                WORKER.digest(manual / name) + "  " + name + "\n"
+                for name in ("database.dump", "roles.sql", "manifest.json")
+            )
+        )
+        before = {name: (manual / name).read_bytes() for name in WORKER.FILES}
+        self.assertEqual(WORKER.prune(self.backups, self.config, WORKER.utc_now(), ""), 0)
+        self.assertEqual({name: (manual / name).read_bytes() for name in WORKER.FILES}, before)
+
+    def test_json_objects_reject_duplicate_names_at_any_depth(self):
+        path = self.root / "ambiguous.json"
+        for text in ('{"kind":"manual","kind":"scheduled"}', '{"outer":{"kind":"manual","kind":"scheduled"}}'):
+            with self.subTest(text=text):
+                path.write_text(text)
+                path.chmod(0o600)
+                with self.assertRaises(WORKER.Failure):
+                    WORKER.read_json(path, {os.geteuid()})
+
     def test_held_lock_prevents_a_second_backup_without_touching_state(self):
         with (self.backups / ".lock").open("w") as stream:
             os.chmod(stream.name, 0o600)

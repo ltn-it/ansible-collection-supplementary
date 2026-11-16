@@ -106,11 +106,19 @@ def private_file(path, owners):
     return metadata
 
 
+def unique_json_object(pairs):
+    value = {}
+    for key, item in pairs:
+        require(key not in value, "json_duplicate_key")
+        value[key] = item
+    return value
+
+
 def read_json(path, owners):
     private_file(path, owners)
     fd = os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW)
     with os.fdopen(fd, encoding="utf-8") as stream:
-        return json.load(stream)
+        return json.load(stream, object_pairs_hook=unique_json_object)
 
 
 def validate_config(config):

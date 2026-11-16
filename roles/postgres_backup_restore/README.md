@@ -93,6 +93,9 @@ Unexpected storage or access errors during retention fail the run and set
 `last-run.json` to `failed`, even when the newly published backup is valid.
 Vanished or concurrently replaced candidate paths are skipped without deletion;
 malformed, modified and foreign material remains preserved.
+JSON object names must be unique at every nesting level. Ambiguous manifests,
+including repeated `kind` fields, are rejected and preserved by retention even
+when their checksum files match the ambiguous bytes.
 Deletion pins the validated directory with an open Linux directory descriptor and
 unlinks only the four known set files relative to that descriptor. Replacing the
 original pathname cannot redirect cleanup into another set; newly added unknown
