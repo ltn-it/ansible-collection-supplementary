@@ -1,0 +1,13 @@
+---
+bugfixes:
+  - >-
+    postgres_backup_restore - atomically publish logged manual dumps from private temporary
+    files, preserving existing hardlinked data and prior destinations on failure.
+  - >-
+    postgres_backup_restore - hash retained payloads only for expired scheduled deletion candidates
+    and verify checksums immediately before removal.
+  - >-
+    postgres_backup_restore - report abandoned or overdue running attempts and unknown run states
+    as unhealthy even when a recent successful backup exists.
+  - >-
+    postgres_backup_restore - reject malformed numeric schedule limits before integer conversion.

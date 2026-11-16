@@ -5,6 +5,9 @@ metadata:
   annotations:
     io.podman.annotations.userns: >-
       keep-id:uid={{ keycloak_deploy_run_user_uid }},gid={{ keycloak_deploy_run_user_gid }}
+{% if keycloak_deploy_rootless_providers_dir | length > 0 %}
+    io.lightningit.keycloak.provider-sha256: {{ (keycloak_deploy_rootless_provider_checksums | to_json(sort_keys=true) | hash('sha256')) | to_json }}
+{% endif %}
 spec:
   containers:
     - name: {{ keycloak_deploy_container_name | to_json }}
@@ -22,6 +25,10 @@ spec:
           hostIP: 127.0.0.1
 {% endif %}
       env:
+{% for name, value in keycloak_deploy_env_extra | dictsort %}
+        - name: {{ name | to_json }}
+          value: {{ value | to_json }}
+{% endfor %}
         - name: KC_DB
           value: {{ ('postgres') | string | to_json }}
         - name: KC_DB_URL_HOST
@@ -53,10 +60,32 @@ spec:
         - name: KC_PROXY_TRUSTED_ADDRESSES
           value: {{ (keycloak_deploy_proxy_trusted_addresses | join(',')) | string | to_json }}
       volumeMounts:
+{% if keycloak_deploy_rootless_providers_dir | length > 0 %}
+        - name: keycloak-script-providers
+          mountPath: /opt/keycloak/providers
+          readOnly: true
+{% endif %}
         - name: keycloak-data
           mountPath: /opt/keycloak/data
+{% if keycloak_deploy_truststore_sources | length > 0 %}
+        - name: keycloak-truststores
+          mountPath: {{ keycloak_deploy_truststore_mount_dir | to_json }}
+          readOnly: true
+{% endif %}
   volumes:
+{% if keycloak_deploy_rootless_providers_dir | length > 0 %}
+    - name: keycloak-script-providers
+      hostPath:
+        path: {{ keycloak_deploy_rootless_providers_dir | to_json }}
+        type: Directory
+{% endif %}
     - name: keycloak-data
       hostPath:
         path: {{ keycloak_deploy_host_data_dir | to_json }}
         type: Directory
+{% if keycloak_deploy_truststore_sources | length > 0 %}
+    - name: keycloak-truststores
+      hostPath:
+        path: {{ keycloak_deploy_truststore_dir | to_json }}
+        type: Directory
+{% endif %}

@@ -1,0 +1,5 @@
+---
+bugfixes:
+  - postgres_backup_restore - Require approval of exact worker bytes before replacing an admitted backup script.
+  - postgres_backup_restore - Reconcile dedicated worker trust with bounded read-back and restoration on failure.
+  - postgres_backup_restore - Keep strict boolean rejection while satisfying worker and fixture sanity checks.

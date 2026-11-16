@@ -1,0 +1,26 @@
+---
+- name: Verify direct worker rendering without claiming native backup execution
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    postgres_backup_restore_test_root: >-
+      {{ lookup('ansible.builtin.env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/scheduler
+  tasks:
+    - name: Read the controller fixture unit
+      ansible.builtin.slurp:
+        src: "{{ postgres_backup_restore_test_root }}/scheduled-backup.service"
+      register: postgres_backup_restore_test_service
+
+    - name: Verify the direct worker and process containment
+      ansible.builtin.assert:
+        that:
+          - "'--run --kind scheduled' in (postgres_backup_restore_test_service.content | b64decode)"
+          - "'--capture' not in (postgres_backup_restore_test_service.content | b64decode)"
+          - "'podman-component' not in (postgres_backup_restore_test_service.content | b64decode)"
+          - "'NoNewPrivileges=true' in (postgres_backup_restore_test_service.content | b64decode)"
+          - "'KillMode=control-group' in (postgres_backup_restore_test_service.content | b64decode)"
+          - >-
+            'StandardOutput=append:/var/log/postgres-backup/fixture/operations.log'
+            in (postgres_backup_restore_test_service.content | b64decode)
+          - "'StandardError=inherit' in (postgres_backup_restore_test_service.content | b64decode)"

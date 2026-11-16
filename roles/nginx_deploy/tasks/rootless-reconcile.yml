@@ -151,6 +151,7 @@
               else 'started' }}
         podman_systemd_unit_name: "{{ nginx_deploy_systemd_unit_name }}"
         podman_systemd_description: Rootless Nginx TLS edge
+        podman_systemd_log_path: "{{ nginx_deploy_log_path }}"
         podman_systemd_manifest_path: "{{ nginx_deploy_host_conf_file | dirname }}/nginx-rootless-pod.yml"
         podman_systemd_scope: user
         podman_systemd_quadlet_dir: "{{ nginx_deploy_rootless_home }}/.config/containers/systemd"
@@ -167,6 +168,31 @@
         port: "{{ nginx_deploy_tls_host_port }}"
         timeout: 60
       changed_when: false
+
+    - name: Verify the running native log destination rather than accepting an unsupported controller
+      ansible.builtin.command:
+        argv:
+          - podman
+          - inspect
+          - --type
+          - container
+          - --format
+          - "{{ '{{json .HostConfig.LogConfig}}' }}"
+          - "{{ nginx_deploy_pod_name }}-nginx"
+      register: nginx_deploy_log_path_actual
+      changed_when: false
+      when: nginx_deploy_log_path | length > 0
+      no_log: true
+
+    - name: Require the selected native path and k8s-file driver to be effective
+      ansible.builtin.assert:
+        that:
+          - (nginx_deploy_log_path_actual.stdout | from_json).Path == nginx_deploy_log_path
+          - (nginx_deploy_log_path_actual.stdout | from_json).Type == 'k8s-file'
+        fail_msg: The installed shared kube controller must support the configured native log destination.
+        quiet: true
+      when: nginx_deploy_log_path | length > 0
+      no_log: true
 
     - name: Record only the successfully reconciled input identity
       ansible.builtin.copy:

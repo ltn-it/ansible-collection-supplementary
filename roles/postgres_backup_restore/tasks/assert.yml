@@ -29,6 +29,148 @@
     fail_msg: "PostgreSQL backup/restore variables are missing or invalid."
   tags: always
 
+- name: Validate scheduled PostgreSQL backup identity
+  ansible.builtin.assert:
+    that:
+      - postgres_backup_restore_schedule_state in ['present', 'absent']
+      - postgres_backup_restore_schedule_enabled is boolean
+      - postgres_backup_restore_schedule_backend in ['systemd', 'cron']
+      - postgres_backup_restore_schedule_cron_file == postgres_backup_restore_schedule_unit
+      - postgres_backup_restore_schedule_instance is match('^[A-Za-z_][A-Za-z0-9_-]{0,62}$')
+      - postgres_backup_restore_schedule_user is match('^[A-Za-z_][A-Za-z0-9_-]{0,31}$')
+      - postgres_backup_restore_schedule_group is match('^[A-Za-z_][A-Za-z0-9_-]{0,31}$')
+      - postgres_backup_restore_schedule_uid | int > 0
+      - postgres_backup_restore_schedule_home is match('^/[A-Za-z0-9_./-]+$')
+      - "'..' not in postgres_backup_restore_schedule_home.split('/')"
+      - >-
+        postgres_backup_restore_schedule_unit ==
+        'postgres-backup-' ~ postgres_backup_restore_schedule_instance
+      - postgres_backup_restore_schedule_worker is match('^/usr/local/libexec/postgres-backup(-[A-Za-z0-9_-]+)?\.py$')
+      - >-
+        postgres_backup_restore_schedule_config ==
+        '/etc/postgres-backup/' ~ postgres_backup_restore_schedule_instance ~ '.json'
+      - >-
+        postgres_backup_restore_schedule_unit_dir ==
+        postgres_backup_restore_schedule_home ~ '/.config/systemd/user'
+    fail_msg: Scheduled backups require an explicit existing non-root application account and instance.
+  when: postgres_backup_restore_action == 'schedule'
+  tags: always
+
+- name: Validate the daily PostgreSQL cron schedule
+  ansible.builtin.assert:
+    that:
+      - postgres_backup_restore_schedule_cron_hour is integer
+      - postgres_backup_restore_schedule_cron_hour >= 0
+      - postgres_backup_restore_schedule_cron_hour <= 23
+      - postgres_backup_restore_schedule_cron_minute is integer
+      - postgres_backup_restore_schedule_cron_minute >= 0
+      - postgres_backup_restore_schedule_cron_minute <= 59
+      - postgres_backup_restore_schedule_cron_timezone is match('^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$')
+    fail_msg: Cron requires a valid daily hour, minute and explicit timezone name.
+  when:
+    - postgres_backup_restore_action == 'schedule'
+    - postgres_backup_restore_schedule_backend == 'cron'
+    - postgres_backup_restore_schedule_state == 'present'
+  tags: always
+
+- name: Reject noninteger scheduled PostgreSQL numeric settings before conversion
+  ansible.builtin.assert:
+    that:
+      - item is integer or (item is string and item is match('^[0-9]+\Z'))
+    fail_msg: Scheduled backup limits must be integers or decimal integer strings, without booleans or fractions.
+    quiet: true
+  loop:
+    - "{{ postgres_backup_restore_schedule_uid }}"
+    - "{{ postgres_backup_restore_schedule_socket_port }}"
+    - "{{ postgres_backup_restore_schedule_retention_days }}"
+    - "{{ postgres_backup_restore_schedule_min_free_percent }}"
+    - "{{ postgres_backup_restore_schedule_timeout_seconds }}"
+    - "{{ postgres_backup_restore_schedule_max_age_seconds }}"
+  when:
+    - postgres_backup_restore_action == 'schedule'
+    - postgres_backup_restore_schedule_state == 'present'
+  tags: always
+
+- name: Validate scheduled PostgreSQL backup settings
+  ansible.builtin.assert:
+    that:
+      - postgres_backup_restore_execution_mode == 'podman'
+      - postgres_backup_restore_format == 'custom'
+      - postgres_backup_restore_db_name is match('^[A-Za-z_][A-Za-z0-9_-]{0,62}$')
+      - postgres_backup_restore_db_user is match('^[A-Za-z_][A-Za-z0-9_-]{0,62}$')
+      - postgres_backup_restore_container_name is match('^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$')
+      - postgres_backup_restore_schedule_image is match('^[^\\s]+@sha256:[0-9a-f]{64}$')
+      - postgres_backup_restore_schedule_source_revision is match('^[0-9a-f]{40}$')
+      - postgres_backup_restore_backup_dir is match('^/[A-Za-z0-9_./-]+$')
+      - postgres_backup_restore_schedule_pgdata_dir is match('^/[A-Za-z0-9_./-]+$')
+      - postgres_backup_restore_backup_dir != postgres_backup_restore_schedule_pgdata_dir
+      - postgres_backup_restore_backup_dir != '/'
+      - postgres_backup_restore_schedule_pgdata_dir != '/'
+      - not postgres_backup_restore_backup_dir.endswith('/')
+      - not postgres_backup_restore_schedule_pgdata_dir.endswith('/')
+      - not postgres_backup_restore_backup_dir.startswith(postgres_backup_restore_schedule_pgdata_dir + '/')
+      - not postgres_backup_restore_schedule_pgdata_dir.startswith(postgres_backup_restore_backup_dir + '/')
+      - "'..' not in postgres_backup_restore_backup_dir.split('/')"
+      - "'..' not in postgres_backup_restore_schedule_pgdata_dir.split('/')"
+      - postgres_backup_restore_schedule_uid | int >= 1
+      - postgres_backup_restore_schedule_uid | int <= 2147483647
+      - postgres_backup_restore_schedule_socket_port | int >= 1
+      - postgres_backup_restore_schedule_socket_port | int <= 65535
+      - postgres_backup_restore_schedule_retention_days | int >= 1
+      - postgres_backup_restore_schedule_retention_days | int <= 3650
+      - postgres_backup_restore_schedule_min_free_percent | int >= 0
+      - postgres_backup_restore_schedule_min_free_percent | int <= 90
+      - postgres_backup_restore_schedule_timeout_seconds | int >= 30
+      - postgres_backup_restore_schedule_timeout_seconds | int <= 86400
+      - postgres_backup_restore_schedule_max_age_seconds | int > 0
+      - postgres_backup_restore_schedule_max_age_seconds | int <= 31536000
+      - postgres_backup_restore_schedule_calendar is sequence
+      - postgres_backup_restore_schedule_calendar is not string
+      - postgres_backup_restore_schedule_calendar | length > 0
+      - postgres_backup_restore_schedule_after is sequence
+      - postgres_backup_restore_schedule_after is not string
+    fail_msg: Scheduled backup settings, private paths or immutable source/image pins are invalid.
+  when:
+    - postgres_backup_restore_action == 'schedule'
+    - postgres_backup_restore_schedule_state == 'present'
+  tags: always
+
+- name: Validate scheduled PostgreSQL calendar lines
+  ansible.builtin.assert:
+    that:
+      - item is string
+      - item | length > 0
+      - "'\n' not in item"
+      - "'\r' not in item"
+    fail_msg: Calendar entries must each be one non-empty systemd calendar line.
+  loop: "{{ postgres_backup_restore_schedule_calendar }}"
+  when:
+    - postgres_backup_restore_action == 'schedule'
+    - postgres_backup_restore_schedule_state == 'present'
+  tags: always
+
+- name: Reject retired custom scheduled backup log capture
+  ansible.builtin.assert:
+    that:
+      - postgres_backup_restore_schedule_log_config == ''
+    fail_msg: Custom log capture is retired; use the direct backup worker and operating system logging.
+    quiet: true
+  when:
+    - postgres_backup_restore_action == 'schedule'
+    - postgres_backup_restore_schedule_state == 'present'
+  tags: always
+
+- name: Validate scheduled PostgreSQL ordering units
+  ansible.builtin.assert:
+    that:
+      - item is match('^[A-Za-z0-9_.@-]+\\.service$')
+    fail_msg: Backup ordering accepts service unit names only.
+  loop: "{{ postgres_backup_restore_schedule_after }}"
+  when:
+    - postgres_backup_restore_action == 'schedule'
+    - postgres_backup_restore_schedule_state == 'present'
+  tags: always
+
 - name: Validate PostgreSQL restore confirmation
   ansible.builtin.assert:
     that:
@@ -40,4 +182,46 @@
   when:
     - postgres_backup_restore_execute | bool
     - postgres_backup_restore_action == 'restore'
+  tags: always
+
+- name: Validate optional PostgreSQL operations log file
+  ansible.builtin.assert:
+    that:
+      - postgres_backup_restore_operations_log_file is string
+      - >-
+        postgres_backup_restore_operations_log_file == '' or
+        postgres_backup_restore_operations_log_file ==
+        '/var/log/postgres-backup/' ~ postgres_backup_restore_schedule_instance ~ '/operations.log'
+      - >-
+        postgres_backup_restore_operations_log_file == '' or
+        not postgres_backup_restore_operations_log_file.startswith(postgres_backup_restore_backup_dir + '/')
+      - >-
+        postgres_backup_restore_operations_log_file == '' or
+        not postgres_backup_restore_operations_log_file.startswith(postgres_backup_restore_schedule_pgdata_dir + '/')
+      - >-
+        postgres_backup_restore_operations_log_file == '' or
+        postgres_backup_restore_operations_log_file not in
+        [postgres_backup_restore_backup_dir, postgres_backup_restore_schedule_pgdata_dir,
+         postgres_backup_restore_file, postgres_backup_restore_restore_source]
+    quiet: true
+    fail_msg: Use the instance-specific operations.log outside backup data and PGDATA, or keep journald.
+  when:
+    - postgres_backup_restore_action in ['schedule', 'backup', 'restore']
+    - postgres_backup_restore_action != 'schedule' or postgres_backup_restore_schedule_state == 'present'
+  tags: always
+
+- name: Require explicit existing account settings for PostgreSQL operation logs
+  ansible.builtin.assert:
+    that:
+      - postgres_backup_restore_schedule_instance is match('^[A-Za-z_][A-Za-z0-9_-]{0,62}$')
+      - postgres_backup_restore_schedule_user is match('^[A-Za-z_][A-Za-z0-9_-]{0,31}$')
+      - postgres_backup_restore_schedule_group is match('^[A-Za-z_][A-Za-z0-9_-]{0,31}$')
+      - postgres_backup_restore_schedule_uid | int > 0
+      - postgres_backup_restore_schedule_home is match('^/[A-Za-z0-9_./-]+$')
+      - postgres_backup_restore_schedule_pgdata_dir is match('^/[A-Za-z0-9_./-]+$')
+    quiet: true
+    fail_msg: Operational file logging requires the explicit prepared backup account, home and PGDATA.
+  when:
+    - postgres_backup_restore_action in ['schedule', 'backup', 'restore']
+    - postgres_backup_restore_operations_log_file | length > 0
   tags: always

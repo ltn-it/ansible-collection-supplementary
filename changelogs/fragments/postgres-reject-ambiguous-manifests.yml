@@ -1,0 +1,5 @@
+---
+bugfixes:
+  - >-
+    postgres_backup_restore - reject duplicate JSON object names at every depth so ambiguous manual backup manifests
+    cannot be classified as scheduled retention candidates.

@@ -1,0 +1,6 @@
+---
+minor_changes:
+  - >-
+    keycloak_deploy and nginx_deploy - optionally pass prepared stable native
+    application log files to the shared kube controller and verify the running
+    containers actually use the selected k8s-file paths before confirming success.

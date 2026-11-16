@@ -207,3 +207,16 @@ keycloak_deploy_rootless_network_subnet: 10.89.50.0/24
 keycloak_deploy_rootless_keycloak_ip: 10.89.50.10
 keycloak_deploy_rootless_postgres_ip: 10.89.50.20
 keycloak_deploy_rootless_publish_management: true
+# Optional prepared native files; empty preserves Podman's logging defaults.
+keycloak_deploy_log_path: ""
+keycloak_deploy_postgres_log_path: ""
+
+# Additional public PEM CAs, supported by the rootless kube deployment.
+# Controller paths; never place private keys in this directory.
+keycloak_deploy_truststore_sources: []
+keycloak_deploy_truststore_dir: "{{ keycloak_deploy_host_data_dir | dirname }}/truststores"
+keycloak_deploy_truststore_mount_dir: /opt/keycloak/conf/truststores/additional
+
+# Prepared provider JARs remain external inputs; this role verifies and mounts them read-only.
+keycloak_deploy_rootless_providers_dir: ""
+keycloak_deploy_rootless_provider_checksums: {}

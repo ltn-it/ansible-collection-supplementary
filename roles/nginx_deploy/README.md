@@ -77,6 +77,16 @@ Existing system-scope platform/profile claims do not establish rootless producti
 support. Rootless remains experimental; the caller owns PKI, trust and backup/
 restore planning. Container names follow Podman's kube pod/container naming.
 
+For experimental user scope, `nginx_deploy_log_path` optionally selects a
+prepared native log file. Its private parent directory and the regular file
+must already exist and be writable by the runtime account. Empty preserves
+Podman's default logging. The shared kube controller must support
+`podman_systemd_log_path`; the running container's actual k8s-file driver and
+path are checked before success is recorded. Destination changes restart the
+pod through its native unit. Plan retention of existing history before changing
+the destination; history is not migrated automatically. Rotation is managed
+separately by the operating system.
+
 ## Dependencies
 
 - `lit.foundational.kubeplay`

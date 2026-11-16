@@ -1,0 +1,5 @@
+---
+bugfixes:
+  - >-
+    postgres_backup_restore - report unexpected storage and access errors during scheduled retention as a failed run
+    while preserving invalid and concurrently replaced candidates.

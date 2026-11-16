@@ -3,6 +3,18 @@
   ansible.builtin.import_tasks: assert.yml
   tags: always
 
+- name: Manage scheduled PostgreSQL backups
+  ansible.builtin.include_tasks:
+    file: schedule.yml
+    apply:
+      tags: [backup, schedule]
+  when:
+    - postgres_backup_restore_action == 'schedule'
+    - postgres_backup_restore_execute | bool
+  tags:
+    - backup
+    - schedule
+
 - name: Report disabled PostgreSQL backup/restore
   ansible.builtin.debug:
     msg: "PostgreSQL backup/restore disabled."
@@ -10,6 +22,43 @@
   tags:
     - backup
     - restore
+
+- name: Prepare explicit operational logging for manual database operations
+  ansible.builtin.include_tasks:
+    file: schedule_output.yml
+    apply:
+      tags: ["{{ postgres_backup_restore_action }}"]
+  when:
+    - postgres_backup_restore_execute | bool
+    - postgres_backup_restore_action in ['backup', 'restore']
+    - postgres_backup_restore_operations_log_file | length > 0
+  tags: ["{{ postgres_backup_restore_action }}"]
+
+- name: Inspect an existing manual backup destination directory before selecting its owner
+  ansible.builtin.stat:
+    path: "{{ postgres_backup_restore_file | dirname }}"
+    follow: false
+  register: postgres_backup_restore_manual_destination
+  when:
+    - postgres_backup_restore_execute | bool
+    - postgres_backup_restore_action == 'backup'
+    - postgres_backup_restore_operations_log_file | length > 0
+  tags: backup
+
+- name: Refuse to repurpose foreign manual backup data
+  ansible.builtin.assert:
+    that:
+      - >-
+        not postgres_backup_restore_manual_destination.stat.exists or
+        (postgres_backup_restore_manual_destination.stat.isdir | default(false) and
+         not postgres_backup_restore_manual_destination.stat.islnk | default(false) and
+         postgres_backup_restore_manual_destination.stat.uid == postgres_backup_restore_schedule_uid | int)
+    quiet: true
+  when:
+    - postgres_backup_restore_execute | bool
+    - postgres_backup_restore_action == 'backup'
+    - postgres_backup_restore_operations_log_file | length > 0
+  tags: backup
 
 - name: Ensure PostgreSQL backup directory exists
   ansible.builtin.file:
@@ -20,13 +69,17 @@
         else postgres_backup_restore_backup_dir
       }}
     state: directory
-    mode: '0750'
+    owner: >-
+      {{ postgres_backup_restore_schedule_user
+         if postgres_backup_restore_operations_log_file | length > 0 else omit }}
+    group: >-
+      {{ postgres_backup_restore_schedule_group
+         if postgres_backup_restore_operations_log_file | length > 0 else omit }}
+    mode: "{{ '0700' if postgres_backup_restore_operations_log_file | length > 0 else '0750' }}"
   when:
-    - postgres_backup_restore_action in ['backup', 'restore']
+    - postgres_backup_restore_action == 'backup'
     - postgres_backup_restore_execute | bool
-  tags:
-    - backup
-    - restore
+  tags: backup
 
 - name: Report PostgreSQL backup/restore dry run
   ansible.builtin.debug:
@@ -39,6 +92,17 @@
   tags:
     - backup
     - restore
+
+- name: Run a manual database operation with protected direct output
+  ansible.builtin.include_tasks:
+    file: logged_operation.yml
+    apply:
+      tags: ["{{ postgres_backup_restore_action }}"]
+  when:
+    - postgres_backup_restore_execute | bool
+    - postgres_backup_restore_action in ['backup', 'restore']
+    - postgres_backup_restore_operations_log_file | length > 0
+  tags: ["{{ postgres_backup_restore_action }}"]
 
 - name: Run PostgreSQL backup
   ansible.builtin.command:
@@ -63,6 +127,7 @@
     - postgres_backup_restore_execute | bool
     - postgres_backup_restore_action == 'backup'
     - postgres_backup_restore_execution_mode == 'client'
+    - postgres_backup_restore_operations_log_file == ''
   tags:
     - backup
 
@@ -85,6 +150,7 @@
     - postgres_backup_restore_execute | bool
     - postgres_backup_restore_action == 'backup'
     - postgres_backup_restore_execution_mode == 'podman'
+    - postgres_backup_restore_operations_log_file == ''
   tags:
     - backup
 
@@ -143,6 +209,7 @@
     - postgres_backup_restore_action == 'restore'
     - postgres_backup_restore_format == 'custom'
     - postgres_backup_restore_execution_mode == 'client'
+    - postgres_backup_restore_operations_log_file == ''
   tags:
     - restore
 
@@ -169,6 +236,7 @@
     - postgres_backup_restore_action == 'restore'
     - postgres_backup_restore_format == 'custom'
     - postgres_backup_restore_execution_mode == 'podman'
+    - postgres_backup_restore_operations_log_file == ''
   tags:
     - restore
 
@@ -195,6 +263,7 @@
     - postgres_backup_restore_action == 'restore'
     - postgres_backup_restore_format == 'plain'
     - postgres_backup_restore_execution_mode == 'client'
+    - postgres_backup_restore_operations_log_file == ''
   tags:
     - restore
 
@@ -218,5 +287,6 @@
     - postgres_backup_restore_action == 'restore'
     - postgres_backup_restore_format == 'plain'
     - postgres_backup_restore_execution_mode == 'podman'
+    - postgres_backup_restore_operations_log_file == ''
   tags:
     - restore

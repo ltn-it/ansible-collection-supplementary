@@ -1,0 +1,94 @@
+---
+- name: Require a canonical prepared provider directory and explicit checksums
+  ansible.builtin.assert:
+    that:
+      - keycloak_deploy_rootless_providers_dir is match('^/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\Z')
+      - keycloak_deploy_rootless_providers_dir is not search('(^|/)[.]{1,2}(/|$)')
+      - keycloak_deploy_rootless_provider_checksums is mapping
+    fail_msg: ROOTLESS_PROVIDER_INPUT_INVALID
+    quiet: true
+
+- name: Validate each declared provider identity before accessing its path
+  ansible.builtin.assert:
+    that:
+      - item.key is string
+      - item.key is match('^[A-Za-z0-9][A-Za-z0-9_.-]*[.]jar\Z')
+      - item.value is string
+      - item.value is match('^[0-9a-f]{64}\Z')
+    fail_msg: ROOTLESS_PROVIDER_INPUT_INVALID
+    quiet: true
+  loop: "{{ keycloak_deploy_rootless_provider_checksums | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Inspect the externally prepared provider directory without following a link
+  ansible.builtin.stat:
+    path: "{{ keycloak_deploy_rootless_providers_dir }}"
+    follow: false
+    get_checksum: false
+    get_mime: false
+  register: keycloak_deploy_providers_directory
+
+- name: Require an existing actual provider directory
+  ansible.builtin.assert:
+    that:
+      - keycloak_deploy_providers_directory.stat.isdir | default(false)
+      - not keycloak_deploy_providers_directory.stat.islnk | default(false)
+    quiet: true
+
+- name: Require runtime access to the prepared provider directory
+  ansible.builtin.command:
+    argv: [/usr/bin/test, "{{ item }}", "{{ keycloak_deploy_rootless_providers_dir }}"]
+  become: true
+  become_user: "{{ keycloak_deploy_rootless_user }}"
+  changed_when: false
+  check_mode: false
+  loop: [-r, -x]
+
+- name: Enumerate provider JARs without changing the directory
+  ansible.builtin.find:
+    paths: "{{ keycloak_deploy_rootless_providers_dir }}"
+    patterns: '*.jar'
+    recurse: false
+    hidden: true
+    follow: false
+    file_type: any
+  register: keycloak_deploy_providers_found
+
+- name: Refuse undeclared or missing provider JARs
+  ansible.builtin.assert:
+    that: >-
+      keycloak_deploy_providers_found.files | map(attribute='path') | map('basename') | sort
+      == keycloak_deploy_rootless_provider_checksums.keys() | list | sort
+    fail_msg: ROOTLESS_PROVIDER_SET_MISMATCH
+    quiet: true
+
+- name: Read prepared provider file checksums without following links
+  ansible.builtin.stat:
+    path: "{{ keycloak_deploy_rootless_providers_dir }}/{{ item }}"
+    follow: false
+    checksum_algorithm: sha256
+    get_mime: false
+  loop: "{{ keycloak_deploy_rootless_provider_checksums.keys() | list }}"
+  register: keycloak_deploy_providers_stat
+
+- name: Require the declared regular single-link provider payloads
+  ansible.builtin.assert:
+    that:
+      - item.stat.isreg | default(false)
+      - item.stat.nlink | default(0) == 1
+      - item.stat.checksum | default('') == keycloak_deploy_rootless_provider_checksums[item.item]
+    fail_msg: ROOTLESS_PROVIDER_CHECKSUM_MISMATCH
+    quiet: true
+  loop: "{{ keycloak_deploy_providers_stat.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Require the existing runtime account to be able to read each provider
+  ansible.builtin.command:
+    argv: [/usr/bin/test, -r, "{{ keycloak_deploy_rootless_providers_dir }}/{{ item }}"]
+  become: true
+  become_user: "{{ keycloak_deploy_rootless_user }}"
+  changed_when: false
+  check_mode: false
+  loop: "{{ keycloak_deploy_rootless_provider_checksums.keys() | list }}"

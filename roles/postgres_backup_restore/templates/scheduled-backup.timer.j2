@@ -1,0 +1,13 @@
+[Unit]
+Description=PostgreSQL backup timer {{ postgres_backup_restore_schedule_instance }}
+
+[Timer]
+{% for calendar in postgres_backup_restore_schedule_calendar %}
+OnCalendar={{ calendar }}
+{% endfor %}
+Persistent=true
+AccuracySec=1min
+Unit={{ postgres_backup_restore_schedule_unit }}.service
+
+[Install]
+WantedBy=timers.target

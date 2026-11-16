@@ -40,7 +40,10 @@ class RootlessEdgeInputs(unittest.TestCase):
 
     def test_guards_precede_managed_changes_and_resolution_is_bound_to_identity(self):
         keycloak = (ROOT / "roles/keycloak_deploy/tasks/rootless.yml").read_text()
-        self.assertIn("keycloak_deploy_env_extra | length == 0", keycloak.split("- name: Resolve")[0])
+        self.assertIn(
+            "keycloak_deploy_env_extra | lit.supplementary.rootless_keycloak_env_valid",
+            keycloak.split("- name: Resolve")[0],
+        )
         self.assertIn("lit.supplementary.rootless_network_valid", keycloak.split("- name: Resolve")[0])
         guards = (ROOT / "roles/nginx_deploy/tasks/rootless.yml").read_text().split("- name: Resolve")[0]
         for setting in (
