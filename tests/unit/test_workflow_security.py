@@ -812,7 +812,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             self.assertEqual(
                 "ltn-it/modulix-validation/.github/workflows/"
                 "collection-quality-profile-isolated.yml@"
-                "a94199c94fd00226e194613d0fb9d52705baa808",
+                "cb317a6d3b3e7b1b0549c3c62bb581e14de778c3",
                 delegated["uses"],
             )
             self.assertNotIn("environment-name", delegated["with"])
@@ -880,6 +880,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         diagnosed_followup = "3d84e26d90cc778fb8c4f462ce481584da57fb5a"
         http_followup = "f138a227d9eee41ea698b1a6f3b9a05f7ae3e18d"
         failed_with_effects = "8926e7f535f158d4af89e4ac68149ff0b8ab740d"
+        published_preparation_failure = "086d039c8c58bc91edfeacadf508c207a03a58b5"
         baseline = {
             "repository": "ltn-it/ansible-collection-supplementary",
             "event_name": "push",
@@ -927,6 +928,24 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                 },
                 True,
             ),
+            ({"event.before": published_preparation_failure}, True),
+            (
+                {
+                    "event.before": published_preparation_failure,
+                    "actor": "litdeg",
+                    "actor_id": "247824904",
+                    "triggering_actor": "litdeg",
+                },
+                True,
+            ),
+            ({"event.before": published_preparation_failure.upper()}, False),
+            ({"event.before": published_preparation_failure[:-1]}, False),
+            ({"event.before": " " + published_preparation_failure}, False),
+            ({"event.before": published_preparation_failure, "run_attempt": "2"}, False),
+            ({"event.before": published_preparation_failure, "event_name": "workflow_dispatch"}, False),
+            ({"event.before": published_preparation_failure, "ref": "refs/heads/develop"}, False),
+            ({"event.before": published_preparation_failure, "actor_id": "247824904"}, False),
+            ({"event.before": published_preparation_failure, "triggering_actor": "litdeg"}, False),
             ({"event.before": failed_with_effects.upper()}, False),
             ({"event.before": failed_with_effects[:-1]}, False),
             ({"event.before": " " + failed_with_effects}, False),
@@ -972,7 +991,16 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             guard = jobs["g06-operating-" + case]["if"]
             windows = re.findall(r"github\.event\.before == '([0-9a-f]{40})'", guard)
             self.assertEqual(
-                [original, followup, preauth_followup, diagnosed_followup, http_followup, failed_with_effects], windows
+                [
+                    original,
+                    followup,
+                    preauth_followup,
+                    diagnosed_followup,
+                    http_followup,
+                    failed_with_effects,
+                    published_preparation_failure,
+                ],
+                windows,
             )
             for changes, wanted in examples:
                 with self.subTest(case=case, changes=changes):
