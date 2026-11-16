@@ -1,0 +1,5 @@
+---
+minor_changes:
+  - >-
+    postgres_backup_restore - share the standard operational file between scheduled
+    backup output and opt-in direct manual backup/restore command output.

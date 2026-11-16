@@ -1,0 +1,5 @@
+---
+bugfixes:
+  - >-
+    postgres_backup_restore - select backup directory preparation only with the backup tag,
+    preventing restore-tagged runs from creating or changing a configured backup destination.

@@ -1,0 +1,5 @@
+---
+minor_changes:
+  - >-
+    postgres_backup_restore - optionally append scheduled worker output through systemd
+    to a protected instance log without a capture helper.

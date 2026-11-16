@@ -1,0 +1,8 @@
+---
+bugfixes:
+  - >-
+    postgres_backup_restore - validate UID and socket-port types and ranges before
+    integer conversion, worker installation or configuration publication.
+  - >-
+    postgres_backup_restore - render UID-derived runtime and bus paths from the canonical
+    integer value for supported decimal text inputs.

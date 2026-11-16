@@ -12,6 +12,50 @@ the operating-system preparation declared by the caller are required.
 
 See `roles/keycloak_deploy/defaults/main.yml`.
 
+The experimental rootless deployment accepts `keycloak_deploy_truststore_sources`,
+a list of absolute controller paths to public `.pem` CA certificates. It copies
+them to `keycloak_deploy_truststore_dir` and mounts this directory read-only at
+`keycloak_deploy_truststore_mount_dir` beneath `/opt/keycloak/conf/truststores/`.
+Keycloak loads this directory at startup. TLS and hostname verification remain
+enabled. Private keys are rejected. An empty list preserves the previous manifest.
+The prepared runtime account needs ownership of the destination directory and
+OpenSSL on the managed host. On SELinux-enforcing hosts, the caller must prepare
+the destination directory and certificates with container-readable labels such
+as `container_file_t`, including newly copied files. This role does not manage
+SELinux file contexts, and Podman kube play does not relabel existing hostPath
+bind mounts. Keep SELinux enforcing; see the rootless prerequisites below.
+Removing previously copied CA files is deliberately not automatic.
+
+For an existing rootless installation, the `rootless-truststore-update` task
+entrypoint validates that the rendered manifest differs only by the truststore
+volume and mount before applying it. Existing truststore sources, mount paths
+and read-only modes must remain unchanged; addition is allowed, replacement is
+not. YAML comparison runs privately on the Ansible controller and does not
+require PyYAML on the managed host. A changed or failed CA copy invalidates the
+applied-state marker even if only an earlier copy succeeded. The next successful
+retry retains that pending restart until reconciliation. Unchanged successful
+copies preserve the marker. CA directories, certificate copies and manifest
+updates run as the existing runtime account. Linked destination ancestors,
+symlinked files and multiply linked files are rejected before copying; certificate
+copying never escalates to root. Invoke other tasks as the existing runtime user with
+its user-manager environment and resolved `keycloak_deploy_rootless_uid` and
+`keycloak_deploy_rootless_quadlet_dir`. Existing deployment inputs, including
+encrypted application credentials, must match the active manifest. The entrypoint
+reconciles only Keycloak through `lit.foundational.podman_systemd`; PostgreSQL and
+the proxy are not reconciled. Readiness failure leaves pending restart work and
+requires restoration of the private manifest backup through the same Quadlet.
+
+Certificate validation uses private staging owned by the runtime account, so
+the validator never needs to change attributes on an SSH-owned transfer file.
+Staging has mode 0700/0600 and is removed on success and failure. Check mode also
+creates and removes this temporary staging, while publication remains a prediction.
+Temporary staging does not invalidate the applied-state marker; managed-copy
+changes or failures retain pending reconciliation.
+Staging cleanup is attempted independently even when applied-marker invalidation
+fails. Such an invalidation failure remains fatal; cleanup does not turn a failed
+certificate update into success.
+This candidate has no general rootless platform or release acceptance claim.
+
 Key variables:
 - `keycloak_deploy_image`
 - `keycloak_deploy_pod_manifest_path`
@@ -147,6 +191,17 @@ Existing system-scope platform/profile claims do not establish rootless producti
 support. Rootless remains experimental; the caller owns PKI, trust and backup/
 restore planning. Container names follow Podman's kube pod/container naming.
 
+For experimental user scope, `keycloak_deploy_log_path` and
+`keycloak_deploy_postgres_log_path` optionally select prepared native log
+files. Empty values preserve Podman's logging defaults. Each file and its
+private parent directory must already exist and be writable by the runtime
+account. This requires a shared `podman_systemd` implementation supporting
+`podman_systemd_log_path`; the role verifies the actual running driver and
+path before recording success, so an older controller cannot silently ignore
+the setting. A destination change restarts the affected pod through its native
+unit. Existing log history is not migrated automatically; plan its retention
+before replacing an existing pod. Configure operating-system rotation separately.
+
 ## Dependencies
 
 Runtime composition uses `lit.supplementary.postgres_deploy` when PostgreSQL is
@@ -212,8 +267,30 @@ Existing rootless networks must match the declared subnet exactly. The role
 inspects that network before writing managed files and rejects a live subnet
 change. A coordinated network migration is outside this experimental path.
 
-The experimental user-scope path requires a canonical IPv4 network with distinct usable static member addresses and rejects nonempty `keycloak_deploy_env_extra`; additional environment settings are not silently ignored.
+The experimental user-scope path requires a canonical IPv4 network with distinct usable static member addresses. `keycloak_deploy_env_extra` supports only explicitly rendered `KC_FEATURES`, `KC_FEATURES_DISABLED`, and canonical `KC_TRUSTSTORE_PATHS` values; protected connection/listener overrides and other names are rejected.
 
 User scope supports the standard `start` command, no extra startup arguments and the root context path. Non-default startup, database vendor/port, container mount paths, host networking or native migration settings are rejected before managed writes. Its derived API URL uses the configured HTTPS hostname; an explicit API URL still takes precedence. System-scope URL derivation is unchanged.
 
 User scope requires the PostgreSQL service name derived from its pod (`<postgres-pod>-pod`). Unsupported `keycloak_deploy_postgres_systemd_unit_name` overrides are rejected before managed writes, preserving the shared lifecycle owner and Keycloak dependencies. Renaming an existing stateful service requires a separate planned transition.
+
+
+### Preserve existing rootless provider and CA bindings
+
+`keycloak_deploy_rootless_providers_dir` optionally mounts an already prepared
+provider directory read-only at `/opt/keycloak/providers`. Declare every JAR in
+`keycloak_deploy_rootless_provider_checksums` as basename to SHA-256. The role
+checks regular single-link payloads and runtime readability; it does not download,
+create, replace, or change ownership of provider code. Feature settings remain
+explicit in `keycloak_deploy_env_extra`; mounting a provider never implicitly
+enables a preview feature.
+
+The sorted, validated provider checksums also bind a Pod annotation. Changing a
+provider's declared content therefore changes the desired manifest and follows
+the normal pending-generation restart/readiness path. An unchanged or reordered
+checksum mapping does not cause a restart. A changed JAR with an old declared
+checksum fails validation before deployment.
+
+A full setup refuses to remove or replace existing mounts, extra environment
+bindings, or start arguments. Declare existing bindings before applying it.
+Intentional removal or data migration requires a separately planned transition.
+Default empty inputs preserve the original manifest shape on new installations.

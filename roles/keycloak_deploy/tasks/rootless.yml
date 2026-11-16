@@ -3,7 +3,12 @@
   ansible.builtin.assert:
     that:
       - keycloak_deploy_systemd_scope == 'user'
-      - keycloak_deploy_env_extra | length == 0
+      - keycloak_deploy_env_extra | lit.supplementary.rootless_keycloak_env_valid
+      - keycloak_deploy_rootless_providers_dir is string
+      - keycloak_deploy_rootless_provider_checksums is mapping
+      - >-
+        keycloak_deploy_rootless_providers_dir | length > 0
+        or keycloak_deploy_rootless_provider_checksums | length == 0
       - keycloak_deploy_postgres_systemd_unit_name == keycloak_deploy_postgres_pod_name ~ '-pod'
       - keycloak_deploy_start_command == 'start'
       - keycloak_deploy_extra_start_args | length == 0
@@ -82,6 +87,13 @@
     that: keycloak_deploy_rootless_uid | int > 0
     quiet: true
 
+- name: Verify explicitly declared prepared provider JARs
+  ansible.builtin.include_tasks: rootless-providers.yml
+  when: keycloak_deploy_rootless_providers_dir | length > 0
+
+- name: Preserve existing declared Keycloak runtime bindings
+  ansible.builtin.include_tasks: rootless-bindings.yml
+
 - name: Locate incompatible legacy rootless container units
   ansible.builtin.stat:
     path: "{{ keycloak_deploy_rootless_quadlet_dir }}/{{ item }}.container"
@@ -154,6 +166,10 @@
         dest: "{{ keycloak_deploy_rootless_quadlet_dir }}/{{ keycloak_deploy_rootless_network }}.network"
         mode: '0600'
       when: not ansible_check_mode
+
+    - name: Provision additional public CA certificates
+      ansible.builtin.include_tasks: rootless-truststores.yml
+      when: keycloak_deploy_truststore_sources | length > 0
 
     - name: Render manifests and retain pending work after any managed-file repair
       block:

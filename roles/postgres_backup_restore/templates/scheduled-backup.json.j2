@@ -1,0 +1,20 @@
+{{ {
+  'instance': postgres_backup_restore_schedule_instance,
+  'container': postgres_backup_restore_container_name,
+  'database': postgres_backup_restore_db_name,
+  'username': postgres_backup_restore_db_user,
+  'backup_dir': postgres_backup_restore_backup_dir,
+  'pgdata_dir': postgres_backup_restore_schedule_pgdata_dir,
+  'pgdata_mount': postgres_backup_restore_schedule_pgdata_mount,
+  'socket_dir': postgres_backup_restore_schedule_socket_dir,
+  'socket_port': postgres_backup_restore_schedule_socket_port | int,
+  'image': postgres_backup_restore_schedule_image,
+  'uid': postgres_backup_restore_schedule_uid | int,
+  'home': postgres_backup_restore_schedule_home,
+  'retention_days': postgres_backup_restore_schedule_retention_days | int,
+  'min_free_percent': postgres_backup_restore_schedule_min_free_percent | int,
+  'timeout_seconds': postgres_backup_restore_schedule_timeout_seconds | int,
+  'max_age_seconds': postgres_backup_restore_schedule_max_age_seconds | int,
+  'source_revision': postgres_backup_restore_schedule_source_revision,
+  'podman_binary': postgres_backup_restore_schedule_podman_binary
+} | to_nice_json }}

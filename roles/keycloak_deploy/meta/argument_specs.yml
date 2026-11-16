@@ -333,3 +333,25 @@ argument_specs:
       keycloak_deploy_rootless_publish_management:
         description: Publish management only on host loopback for local readiness checks.
         type: bool
+      keycloak_deploy_log_path:
+        description: Optional prepared native Keycloak log file for experimental rootless user scope.
+        type: str
+      keycloak_deploy_postgres_log_path:
+        description: Optional prepared native PostgreSQL log file for experimental rootless user scope.
+        type: str
+      keycloak_deploy_truststore_sources:
+        description: Absolute controller paths to additional public PEM CA certificates for rootless deployments.
+        type: list
+        elements: path
+      keycloak_deploy_truststore_dir:
+        description: Prepared runtime-owned host directory for additional public CA certificates.
+        type: path
+      keycloak_deploy_truststore_mount_dir:
+        description: Read-only container mount beneath the standard Keycloak truststores directory.
+        type: path
+      keycloak_deploy_rootless_providers_dir:
+        description: Optional prepared host directory of provider JARs, mounted read-only without provisioning code.
+        type: path
+      keycloak_deploy_rootless_provider_checksums:
+        description: Expected provider JAR basename to SHA-256 mapping; all JARs in the prepared directory must match.
+        type: dict

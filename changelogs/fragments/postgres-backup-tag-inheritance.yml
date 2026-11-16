@@ -1,0 +1,5 @@
+---
+bugfixes:
+  - >-
+    postgres_backup_restore - propagate backup, restore and schedule selection into dynamic child tasks
+    so tagged operations execute before backup pruning and scheduler changes are not silently skipped.

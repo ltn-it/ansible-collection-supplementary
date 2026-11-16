@@ -1,0 +1,9 @@
+---
+bugfixes:
+  - >-
+    keycloak_deploy - compare additive CA updates on the controller, preserve
+    existing truststore bindings and retain pending reconciliation after partial
+    certificate-copy failures.
+  - >-
+    postgres_backup_restore - preserve named custom archives for logged
+    client-mode restores, including parallel pg_restore options.

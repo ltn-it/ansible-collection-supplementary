@@ -1,0 +1,4 @@
+---
+bugfixes:
+  - keycloak_deploy - attempt private certificate staging cleanup even when applied-marker
+    invalidation fails, while preserving the failed update result.

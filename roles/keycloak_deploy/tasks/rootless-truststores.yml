@@ -1,0 +1,118 @@
+---
+- name: Validate public CA inputs
+  ansible.builtin.assert:
+    that:
+      - keycloak_deploy_truststore_sources is sequence
+      - keycloak_deploy_truststore_sources is not string
+      - keycloak_deploy_truststore_dir is match('^/[^\r\n]+\Z')
+      - keycloak_deploy_truststore_dir != keycloak_deploy_host_data_dir
+      - keycloak_deploy_truststore_mount_dir is match('^/opt/keycloak/conf/truststores/[A-Za-z0-9_-]+\Z')
+      - >-
+        keycloak_deploy_truststore_sources | map('basename') | unique | length
+        == keycloak_deploy_truststore_sources | length
+    quiet: true
+
+- name: Require public PEM certificates without private keys
+  ansible.builtin.assert:
+    that:
+      - item is match('^/[^\r\n]+[.]pem\Z')
+      - "'-----BEGIN CERTIFICATE-----' in lookup('ansible.builtin.file', item)"
+      - "'PRIVATE KEY' not in lookup('ansible.builtin.file', item)"
+    quiet: true
+  loop: "{{ keycloak_deploy_truststore_sources }}"
+
+- name: Reject linked public CA destinations before preparing or copying files
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_facts.get('python', {}).get('executable', '/usr/bin/python3') }}"
+      - -c
+      - |
+        import json,pathlib,stat,sys
+        directory=pathlib.Path(sys.argv[1])
+        assert not any(p.is_symlink() for p in (directory,*directory.parents)), 'ROOTLESS_CA_LINKED_PATH'
+        for name in json.loads(sys.argv[2]):
+            p=directory/name
+            if p.is_symlink():
+                raise ValueError('ROOTLESS_CA_LINKED_PATH')
+            if p.exists():
+                s=p.stat()
+                assert stat.S_ISREG(s.st_mode) and s.st_nlink==1, 'ROOTLESS_CA_LINKED_PATH'
+      - "{{ keycloak_deploy_truststore_dir }}"
+      - "{{ keycloak_deploy_truststore_sources | map('basename') | list | to_json }}"
+  changed_when: false
+  check_mode: false
+
+- name: Create the additional public CA directory
+  ansible.builtin.file:
+    path: "{{ keycloak_deploy_truststore_dir }}"
+    state: directory
+    mode: '0755'
+  become: true
+  become_user: "{{ keycloak_deploy_rootless_user }}"
+
+- name: Retain pending reconciliation even after a partial public CA copy failure
+  block:
+    - name: Initialize this certificate copy attempt
+      ansible.builtin.set_fact:
+        keycloak_deploy_truststore_copy: {}
+        keycloak_deploy_truststore_stage: {}
+
+    - name: Create private runtime-owned staging for certificate validation
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: lit-keycloak-ca-
+      register: keycloak_deploy_truststore_stage
+      become: true
+      become_user: "{{ keycloak_deploy_rootless_user }}"
+      check_mode: false
+      changed_when: false
+
+    - name: Stage public certificates without changing the managed destination
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ keycloak_deploy_truststore_stage.path }}/{{ item | basename }}"
+        mode: '0600'
+        owner: "{{ keycloak_deploy_rootless_user }}"
+        follow: false
+      loop: "{{ keycloak_deploy_truststore_sources }}"
+      become: true
+      become_user: "{{ keycloak_deploy_rootless_user }}"
+      check_mode: false
+      changed_when: false
+
+    - name: Copy validated public CA certificates
+      ansible.builtin.copy:
+        src: "{{ keycloak_deploy_truststore_stage.path }}/{{ item | basename }}"
+        dest: "{{ keycloak_deploy_truststore_dir }}/{{ item | basename }}"
+        remote_src: true
+        mode: '0644'
+        owner: "{{ keycloak_deploy_rootless_user }}"
+        follow: false
+        validate: /usr/bin/openssl x509 -in %s -noout
+      loop: "{{ keycloak_deploy_truststore_sources }}"
+      register: keycloak_deploy_truststore_copy
+      become: true
+      become_user: "{{ keycloak_deploy_rootless_user }}"
+
+  always:
+    - name: Attempt marker invalidation and independently clean private staging
+      block:
+        - name: Retain a pending Keycloak restart after CA changes or an uncertain copy
+          ansible.builtin.file:
+            path: "{{ keycloak_deploy_config_dir }}/.keycloak-last-applied"
+            state: absent
+          when:
+            - >-
+              (keycloak_deploy_truststore_copy | default({})) is changed or
+              (keycloak_deploy_truststore_copy | default({})) is failed
+            - not ansible_check_mode
+      always:
+        - name: Remove only this attempt's private certificate staging
+          ansible.builtin.file:
+            path: "{{ keycloak_deploy_truststore_stage.path }}"
+            state: absent
+          when: keycloak_deploy_truststore_stage.path is defined
+          become: true
+          become_user: "{{ keycloak_deploy_rootless_user }}"
+          check_mode: false
+          changed_when: false
