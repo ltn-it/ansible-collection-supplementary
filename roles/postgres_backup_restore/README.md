@@ -77,6 +77,10 @@ and schedule-management tasks. A failed manual backup stops before pruning.
 contains worker descendants when stopping the service. Never route a database
 dump stream or restored SQL into an operational log.
 
+A manual operation and its output preparation inherit only the configured
+`postgres_backup_restore_action` tag: `--tags backup` does not execute a configured
+restore, and `--tags restore` does not execute a configured backup or its pruning.
+
 Scheduled sets contain the entire selected database, role definitions **without
 passwords**, an immutable manifest and SHA-256 checksums. Role definitions are
 compared before/after the dump. Only PostgreSQL's paired random psql guard lines

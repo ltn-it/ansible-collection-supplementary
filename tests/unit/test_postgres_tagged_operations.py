@@ -17,7 +17,7 @@ ROLE = Path(__file__).resolve().parents[2] / "roles/postgres_backup_restore"
 
 
 class TaggedOperationTests(unittest.TestCase):
-    def execute(self, action, tag, fail_operation=False):
+    def execute(self, action, tag, fail_operation=False, selected=True):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             backup = root / "postgres-new.dump"
@@ -76,6 +76,7 @@ class TaggedOperationTests(unittest.TestCase):
             values = dict(
                 postgres_backup_restore_action=action,
                 postgres_backup_restore_execute=True,
+                postgres_backup_restore_restore_confirm="YES_RESTORE",
                 postgres_backup_restore_operations_log_file="explicit-fixture-log",
                 postgres_backup_restore_file=str(backup),
                 postgres_backup_restore_backup_dir=str(root),
@@ -107,7 +108,26 @@ class TaggedOperationTests(unittest.TestCase):
                 env=dict(os.environ, ANSIBLE_LOCAL_TEMP=str(root / "local")),
             )
             self.assertEqual(result.returncode, 2 if fail_operation else 0, result.stdout + result.stderr)
-            if action == "schedule":
+            if not selected:
+                observed = dict(
+                    prepared=preparation.exists(),
+                    confirmed_restore_executed=operation.exists(),
+                    backup_executed=backup.exists(),
+                    scheduler_changed=schedule.exists(),
+                    old_backup_preserved=older.exists(),
+                )
+                self.assertEqual(
+                    observed,
+                    dict(
+                        prepared=False,
+                        confirmed_restore_executed=False,
+                        backup_executed=False,
+                        scheduler_changed=False,
+                        old_backup_preserved=True,
+                    ),
+                    "Wrong action selection must not prepare, execute or prune",
+                )
+            elif action == "schedule":
                 self.assertTrue(schedule.exists(), result.stdout)
                 self.assertTrue(older.exists())
             else:
@@ -136,3 +156,9 @@ class TaggedOperationTests(unittest.TestCase):
 
     def test_failed_tagged_backup_preserves_previous_sets(self):
         self.execute("backup", "backup", fail_operation=True)
+
+    def test_backup_tag_does_not_execute_confirmed_logged_restore(self):
+        self.execute("restore", "backup", selected=False)
+
+    def test_restore_tag_does_not_execute_logged_backup_or_pruning(self):
+        self.execute("backup", "restore", selected=False)

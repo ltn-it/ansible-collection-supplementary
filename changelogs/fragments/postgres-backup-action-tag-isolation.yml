@@ -1,0 +1,5 @@
+---
+bugfixes:
+  - >-
+    postgres_backup_restore - limit included manual operation and output preparation tags to the configured action
+    so selecting backup never executes a configured restore and selecting restore never executes a configured backup.
