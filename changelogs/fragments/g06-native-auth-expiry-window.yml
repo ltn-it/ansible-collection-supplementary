@@ -1,0 +1,7 @@
+---
+bugfixes:
+  - >-
+    collection quality - retain the exact failed native-authentication predecessor
+    as a scheduling boundary for the next Main push. Root independently verifies
+    the original terminal history and preserves its retained partial preparation;
+    no rerun, attempt reset, or adoption of that partial configuration is allowed.
