@@ -939,7 +939,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                 },
                 True,
             ),
-            ({"event.before": published_preparation_failure.upper()}, False),
+            ({"event.before": published_preparation_failure.upper()}, True),
             ({"event.before": native_expiry_failure}, True),
             (
                 {
@@ -950,7 +950,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                 },
                 True,
             ),
-            ({"event.before": native_expiry_failure.upper()}, False),
+            ({"event.before": native_expiry_failure.upper()}, True),
             ({"event.before": native_expiry_failure[:-1]}, False),
             ({"event.before": " " + native_expiry_failure}, False),
             ({"event.before": native_expiry_failure, "run_attempt": "2"}, False),
@@ -966,7 +966,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             ({"event.before": published_preparation_failure, "ref": "refs/heads/develop"}, False),
             ({"event.before": published_preparation_failure, "actor_id": "247824904"}, False),
             ({"event.before": published_preparation_failure, "triggering_actor": "litdeg"}, False),
-            ({"event.before": failed_with_effects.upper()}, False),
+            ({"event.before": failed_with_effects.upper()}, True),
             ({"event.before": failed_with_effects[:-1]}, False),
             ({"event.before": " " + failed_with_effects}, False),
             ({"event.before": failed_with_effects, "run_attempt": "2"}, False),
@@ -1034,7 +1034,8 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                     condition = " ".join(condition.split())
                     self.assertRegex(condition, r"^[a-zA-Z0-9' /._=!&|()\[\]-]+$")
                     result = subprocess.run(  # noqa: S603 -- fixed boolean guard, constrained above.
-                        [executable, "-c", "[[ " + condition + " ]]"],
+                        # Actions string equality ignores ASCII case for these fixed guard values.
+                        [executable, "-c", "shopt -s nocasematch; [[ " + condition + " ]]"],
                         check=False,
                         capture_output=True,
                         timeout=5,
