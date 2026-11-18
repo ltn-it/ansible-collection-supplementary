@@ -812,7 +812,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             self.assertEqual(
                 "ltn-it/modulix-validation/.github/workflows/"
                 "collection-quality-profile-isolated.yml@"
-                "1be871ceb82d977f9403e87554d2ade9dc9714e9",
+                "99efac0591dd9cd4df836d7d8d805ccdc3ec808f",
                 delegated["uses"],
             )
             self.assertNotIn("environment-name", delegated["with"])
@@ -882,6 +882,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         failed_with_effects = "8926e7f535f158d4af89e4ac68149ff0b8ab740d"
         published_preparation_failure = "086d039c8c58bc91edfeacadf508c207a03a58b5"
         native_expiry_failure = "cfd2e8ca4cbcf58a1a22cf37f2a8336bba19cb85"
+        catalogue_reader_failure = "8345d447e65609e66eac616afbeb3b5d4bc362be"
         baseline = {
             "repository": "ltn-it/ansible-collection-supplementary",
             "event_name": "push",
@@ -940,6 +941,25 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                 True,
             ),
             ({"event.before": published_preparation_failure.upper()}, True),
+            ({"event.before": catalogue_reader_failure}, True),
+            (
+                {
+                    "event.before": catalogue_reader_failure,
+                    "actor": "litdeg",
+                    "actor_id": "247824904",
+                    "triggering_actor": "litdeg",
+                },
+                True,
+            ),
+            ({"event.before": catalogue_reader_failure.upper()}, True),
+            ({"event.before": catalogue_reader_failure[:-1]}, False),
+            ({"event.before": " " + catalogue_reader_failure}, False),
+            ({"event.before": catalogue_reader_failure, "run_attempt": "2"}, False),
+            ({"event.before": catalogue_reader_failure, "event_name": "workflow_dispatch"}, False),
+            ({"event.before": catalogue_reader_failure, "event_name": "pull_request"}, False),
+            ({"event.before": catalogue_reader_failure, "ref": "refs/heads/develop"}, False),
+            ({"event.before": catalogue_reader_failure, "actor_id": "247824904"}, False),
+            ({"event.before": catalogue_reader_failure, "triggering_actor": "litdeg"}, False),
             ({"event.before": native_expiry_failure}, True),
             (
                 {
@@ -1020,6 +1040,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                     failed_with_effects,
                     published_preparation_failure,
                     native_expiry_failure,
+                    catalogue_reader_failure,
                 ],
                 windows,
             )
