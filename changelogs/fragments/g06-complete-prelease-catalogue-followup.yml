@@ -1,0 +1,8 @@
+---
+bugfixes:
+  - >-
+    ci - include the exact failed complete-prelease predecessor in all three G06 operating windows
+    while retaining attempt-one, actor, protected Main and ordered predecessor requirements.
+  - >-
+    ci - bind all isolated Heavy and operating consumers to the normally published Validation Main
+    revision 99efac0591dd9cd4df836d7d8d805ccdc3ec808f.
