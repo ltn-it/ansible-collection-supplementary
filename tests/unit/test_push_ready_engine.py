@@ -59,10 +59,30 @@ class PushReadyEngineTests(unittest.TestCase):
         trusted_paths = set(ENGINE["TRUSTED_CHECK_POLICY_PATHS"])
 
         self.assertIn(".pre-commit-config.yaml", trusted_paths)
+        self.assertIn(".lit/ltn399-push-ready-origin-adoption.json", trusted_paths)
         self.assertIn("scripts/devtools-local-quality.sh", trusted_paths)
         self.assertIn("scripts/lit-repository-quality.py", trusted_paths)
         self.assertIn("scripts/lit-trust-root-base-verifier.py", trusted_paths)
         self.assertIn("scripts/validate-embedded-code.py", trusted_paths)
+
+    def test_governed_origin_preserves_actual_owner_after_organization_rename(self) -> None:
+        parse = ENGINE["governed_push_remote_from_url"]
+        for owner in ("ltn-it", "lightning-it"):
+            for url in (
+                f"https://github.com/{owner}/ansible-collection-supplementary.git",
+                f"ssh://git@github.com/{owner}/ansible-collection-supplementary.git",
+                f"git@github.com:{owner}/ansible-collection-supplementary.git",
+            ):
+                with self.subTest(url=url):
+                    self.assertEqual(f"{owner}/ansible-collection-supplementary", parse("origin", url)["repository"])
+        for name, url in (
+            ("upstream", "https://github.com/ltn-it/ansible-collection-supplementary.git"),
+            ("origin", "https://github.com/untrusted/ansible-collection-supplementary.git"),
+            ("origin", "https://github.com/ltn-it/ansible-collection-supplementary/extra.git"),
+            ("origin", "https://github.com/ltn-it/ansible-collection-supplementary.git\n"),
+        ):
+            with self.subTest(name=name, url=url), self.assertRaises(RuntimeError):
+                parse(name, url)
 
     def test_local_quality_dispatcher_changes_require_trust_root_review(self) -> None:
         change = ENGINE["PlannedChange"]("base", "a" * 40, "a" * 40, "b" * 40, "", (), {}, "c" * 64)

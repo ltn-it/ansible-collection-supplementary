@@ -1,0 +1,6 @@
+---
+minor_changes:
+  - >-
+    forward_proxy can bind exact client source CIDRs to separate destination
+    domain lists while preserving the existing shared policy for consumers
+    that do not enable source-bound rules.

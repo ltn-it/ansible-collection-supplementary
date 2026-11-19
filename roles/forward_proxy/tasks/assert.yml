@@ -70,6 +70,13 @@
       - forward_proxy_allowed_destination_domains is sequence
       - forward_proxy_allowed_destination_domains is not string
       - not forward_proxy_enabled or forward_proxy_allowed_destination_domains | length > 0
+      - forward_proxy_destination_domains_by_client is mapping
+      - >-
+        forward_proxy_destination_domains_by_client | length == 0
+        or (
+          forward_proxy_destination_domains_by_client.keys() | list | sort
+          == forward_proxy_allowed_clients | sort
+        )
       - forward_proxy_allowed_destination_ports is sequence
       - forward_proxy_allowed_destination_ports is not string
       - forward_proxy_allowed_destination_ports | length > 0
@@ -170,6 +177,20 @@
         )
     fail_msg: "Forward proxy destinations must be exact DNS names or dotted domain suffixes."
   loop: "{{ forward_proxy_allowed_destination_domains }}"
+
+- name: Validate each exact forward proxy client domain policy
+  ansible.builtin.assert:
+    that:
+      - item.value is sequence
+      - item.value is not string
+      - item.value is not mapping
+      - item.value | length > 0
+      - item.value | unique | list | length == item.value | length
+      - item.value | difference(forward_proxy_allowed_destination_domains) | length == 0
+    fail_msg: >-
+      Every source-bound proxy policy must have a nonempty unique domain list
+      drawn from the declared destination inventory.
+  loop: "{{ forward_proxy_destination_domains_by_client | dict2items }}"
 
 - name: Validate forward proxy destination ports
   ansible.builtin.assert:
