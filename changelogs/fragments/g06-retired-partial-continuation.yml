@@ -1,0 +1,7 @@
+---
+bugfixes:
+  - >-
+    G06 - retain the retired Main revision in the scheduling guards for the three
+    operating cases. The original run attempt and independent Root admission remain required.
+  - >-
+    ci - use the same published Validation revision for isolated VM execution and release evidence.

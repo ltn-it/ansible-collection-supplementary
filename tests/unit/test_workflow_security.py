@@ -812,7 +812,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             self.assertEqual(
                 "ltn-it/modulix-validation/.github/workflows/"
                 "collection-quality-profile-isolated.yml@"
-                "99efac0591dd9cd4df836d7d8d805ccdc3ec808f",
+                "eeb932bf8a2a064a78161925182a3141df489790",
                 delegated["uses"],
             )
             self.assertNotIn("environment-name", delegated["with"])
@@ -883,6 +883,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         published_preparation_failure = "086d039c8c58bc91edfeacadf508c207a03a58b5"
         native_expiry_failure = "cfd2e8ca4cbcf58a1a22cf37f2a8336bba19cb85"
         catalogue_reader_failure = "8345d447e65609e66eac616afbeb3b5d4bc362be"
+        partial_preparation_failure = "86f3cb46e5856c4066cac14e73f46c3cefb8453e"
         baseline = {
             "repository": "ltn-it/ansible-collection-supplementary",
             "event_name": "push",
@@ -941,6 +942,22 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                 True,
             ),
             ({"event.before": published_preparation_failure.upper()}, True),
+            ({"event.before": partial_preparation_failure}, True),
+            (
+                {
+                    "event.before": partial_preparation_failure,
+                    "actor": "litdeg",
+                    "actor_id": "247824904",
+                    "triggering_actor": "litdeg",
+                },
+                True,
+            ),
+            ({"event.before": partial_preparation_failure.upper()}, True),
+            ({"event.before": partial_preparation_failure[:-1]}, False),
+            ({"event.before": " " + partial_preparation_failure}, False),
+            ({"event.before": partial_preparation_failure, "run_attempt": "2"}, False),
+            ({"event.before": partial_preparation_failure, "event_name": "workflow_dispatch"}, False),
+            ({"event.before": partial_preparation_failure, "triggering_actor": "litdeg"}, False),
             ({"event.before": catalogue_reader_failure}, True),
             (
                 {
@@ -1041,6 +1058,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                     published_preparation_failure,
                     native_expiry_failure,
                     catalogue_reader_failure,
+                    partial_preparation_failure,
                 ],
                 windows,
             )
