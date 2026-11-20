@@ -946,8 +946,15 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             ({"event.before": published_preparation_failure.upper()}, True),
             ({"event.before": partial_preparation_failure}, True),
             ({"event.before": terminal_prelease_failure}, True),
-            ({"event.before": terminal_prelease_failure, "actor": "litdeg",
-              "actor_id": "247824904", "triggering_actor": "litdeg"}, True),
+            (
+                {
+                    "event.before": terminal_prelease_failure,
+                    "actor": "litdeg",
+                    "actor_id": "247824904",
+                    "triggering_actor": "litdeg",
+                },
+                True,
+            ),
             ({"event.before": terminal_prelease_failure, "run_attempt": "2"}, False),
             ({"event.before": terminal_prelease_failure, "event_name": "workflow_dispatch"}, False),
             (
