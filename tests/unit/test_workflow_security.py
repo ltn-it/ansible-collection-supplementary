@@ -807,12 +807,13 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             self.assertIn("github.ref == 'refs/heads/main'", protected_main_guard)
             self.assertNotIn("pull_request", protected_main_guard)
             self.assertNotIn("workflow_dispatch", protected_main_guard)
+        self.assertIn("tiny", jobs["heavy-cells"]["needs"])
         for job_name in ("heavy-cells", "acceptance-cells"):
             delegated = jobs[job_name]
             self.assertEqual(
                 "ltn-it/modulix-validation/.github/workflows/"
                 "collection-quality-profile-isolated.yml@"
-                "eeb932bf8a2a064a78161925182a3141df489790",
+                "ade2ad12b4b6daa90332f1a7c087ed61ae6bed57",
                 delegated["uses"],
             )
             self.assertNotIn("environment-name", delegated["with"])
@@ -883,6 +884,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         published_preparation_failure = "086d039c8c58bc91edfeacadf508c207a03a58b5"
         native_expiry_failure = "cfd2e8ca4cbcf58a1a22cf37f2a8336bba19cb85"
         catalogue_reader_failure = "8345d447e65609e66eac616afbeb3b5d4bc362be"
+        terminal_prelease_failure = "5604f19544f97b572272496fd61f5c4949d45fba"
         partial_preparation_failure = "86f3cb46e5856c4066cac14e73f46c3cefb8453e"
         baseline = {
             "repository": "ltn-it/ansible-collection-supplementary",
@@ -943,6 +945,11 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             ),
             ({"event.before": published_preparation_failure.upper()}, True),
             ({"event.before": partial_preparation_failure}, True),
+            ({"event.before": terminal_prelease_failure}, True),
+            ({"event.before": terminal_prelease_failure, "actor": "litdeg",
+              "actor_id": "247824904", "triggering_actor": "litdeg"}, True),
+            ({"event.before": terminal_prelease_failure, "run_attempt": "2"}, False),
+            ({"event.before": terminal_prelease_failure, "event_name": "workflow_dispatch"}, False),
             (
                 {
                     "event.before": partial_preparation_failure,
@@ -1059,6 +1066,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                     native_expiry_failure,
                     catalogue_reader_failure,
                     partial_preparation_failure,
+                    terminal_prelease_failure,
                 ],
                 windows,
             )
