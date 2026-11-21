@@ -885,6 +885,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         native_expiry_failure = "cfd2e8ca4cbcf58a1a22cf37f2a8336bba19cb85"
         catalogue_reader_failure = "8345d447e65609e66eac616afbeb3b5d4bc362be"
         terminal_prelease_failure = "5604f19544f97b572272496fd61f5c4949d45fba"
+        closed_preparation = "e403e0fffa9318be82718b29e854ab7a3a6da98c"
         partial_preparation_failure = "86f3cb46e5856c4066cac14e73f46c3cefb8453e"
         baseline = {
             "repository": "ltn-it/ansible-collection-supplementary",
@@ -957,6 +958,20 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             ),
             ({"event.before": terminal_prelease_failure, "run_attempt": "2"}, False),
             ({"event.before": terminal_prelease_failure, "event_name": "workflow_dispatch"}, False),
+            ({"event.before": closed_preparation}, True),
+            (
+                {
+                    "event.before": closed_preparation,
+                    "actor": "litdeg",
+                    "actor_id": "247824904",
+                    "triggering_actor": "litdeg",
+                },
+                True,
+            ),
+            ({"event.before": closed_preparation, "run_attempt": "2"}, False),
+            ({"event.before": closed_preparation, "event_name": "workflow_dispatch"}, False),
+            ({"event.before": closed_preparation, "ref": "refs/heads/develop"}, False),
+            ({"event.before": closed_preparation, "triggering_actor": "litdeg"}, False),
             (
                 {
                     "event.before": partial_preparation_failure,
@@ -1074,6 +1089,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                     catalogue_reader_failure,
                     partial_preparation_failure,
                     terminal_prelease_failure,
+                    closed_preparation,
                 ],
                 windows,
             )

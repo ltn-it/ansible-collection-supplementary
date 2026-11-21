@@ -141,6 +141,7 @@ XML_SECRET_PROPERTY_RE = re.compile(
     r"refresh[_-]?token|id[_-]?token|authorization|cookie|set-cookie|api[_-]?key|x[_-]?api[_-]?key|"
     r"private[_-]?key)[\"'][^>]*?\bvalue\s*=\s*[\"'])([^\"']*)([\"'])"
 )
+_TEXT_SECRET_PREFIX_RE = re.compile(r"(?i:bearer|basic|akia|asia)")
 
 
 class EvidenceError(RuntimeError):
@@ -240,7 +241,20 @@ def _strict_json_loads(value: str) -> Any:
     return json.loads(value, object_pairs_hook=object_without_duplicates)
 
 
+def _may_contain_text_secret(value: str) -> bool:
+    # Text rules need a delimiter, the JWT prefix, or one of the words above.
+    if any(marker in value for marker in ("-", "_", ":", "=", "eyJ")):
+        return True
+    # Large ASCII digest logs can rule out every remaining prefix without a
+    # regex pass or a lowercase copy. Non-ASCII uses the rules' Unicode casing.
+    if value.isascii() and not any(letter in value for letter in ("i", "I", "r", "R")):
+        return False
+    return _TEXT_SECRET_PREFIX_RE.search(value) is not None
+
+
 def redact_text(value: str) -> str:
+    if not _may_contain_text_secret(value):
+        return value
     value = value.replace(CANARY, "[REDACTED]")
     value = PRIVATE_KEY_RE.sub("[REDACTED PRIVATE KEY]", value)
     value = BEARER_RE.sub("Bearer [REDACTED]", value)
@@ -479,13 +493,14 @@ def _scan_payload(data: bytes, display_path: str) -> list[dict[str, str]]:
         ("xml-secret-property", XML_SECRET_PROPERTY_RE),
         ("secret-assignment", SECRET_ASSIGNMENT_RE),
     )
-    for kind, pattern in patterns:
-        for match in pattern.finditer(text):
-            matched = match.group(0)
-            if "[REDACTED" in matched:
-                continue
-            findings.append({"path": display_path, "kind": kind})
-            break
+    if _may_contain_text_secret(text):
+        for kind, pattern in patterns:
+            for match in pattern.finditer(text):
+                matched = match.group(0)
+                if "[REDACTED" in matched:
+                    continue
+                findings.append({"path": display_path, "kind": kind})
+                break
     try:
         parsed = json.loads(text)
     except (json.JSONDecodeError, ValueError):

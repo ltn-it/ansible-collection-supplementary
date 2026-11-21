@@ -1,0 +1,8 @@
+---
+bugfixes:
+  - >-
+    Allow the three G06 operating cases on the protected Main push following the
+    failed preparation whose retention and cleanup are verified on Runner01.
+  - >-
+    Avoid repeated full-text secret-pattern scans for evidence without any
+    required text markers, while preserving structured evidence checks.
