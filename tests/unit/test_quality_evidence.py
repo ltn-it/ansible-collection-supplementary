@@ -1560,6 +1560,23 @@ class QualityEvidenceTests(unittest.TestCase):
         self.assertNotIn(synthetic_jwt, rendered)
         self.assertIn("[REDACTED JWT]", rendered)
 
+    def test_scan_and_redaction_keep_prefix_rules_without_assignment_delimiters(self) -> None:
+        public_log = "abcdef0123456789\n" * 4096
+        self.assertEqual(evidence._scan_payload(public_log.encode(), "public.log"), [])
+        self.assertEqual(evidence.redact_text(public_log), public_log)
+
+        cases = {
+            "bearer-token": "BEARER fixture0123456789",
+            "basic-authorization": "Baſıc Zml4dHVyZQ",
+            "api-key": "AKİA" + "Z" * 16,
+            "jwt": "eyJfixture.fixture.fixture",
+        }
+        for kind, fixture in cases.items():
+            with self.subTest(kind=kind):
+                findings = evidence._scan_payload(fixture.encode(), "fixture.log")
+                self.assertIn({"path": "fixture.log", "kind": kind}, findings)
+                self.assertIn("[REDACTED", evidence.redact_text(fixture))
+
     def test_unknown_junit_commit_is_ineligible(self) -> None:
         self._registry()
         self._junit(commit="unknown")
