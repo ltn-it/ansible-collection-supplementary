@@ -813,7 +813,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             self.assertEqual(
                 "ltn-it/modulix-validation/.github/workflows/"
                 "collection-quality-profile-isolated.yml@"
-                "ade2ad12b4b6daa90332f1a7c087ed61ae6bed57",
+                "45b0b8264d74d56ab9624d009541965e06d7693f",
                 delegated["uses"],
             )
             self.assertNotIn("environment-name", delegated["with"])
