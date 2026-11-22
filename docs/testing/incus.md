@@ -89,6 +89,22 @@ when kernel behavior, full systemd fidelity, nested virtualization, or operating
 system fidelity requires one. CPU, memory, and disk limits are explicit in the
 scenario matrix.
 
+### Protected Main intake and operating evidence
+
+The Runtimev2 broker seals and verifies the archives before it builds the
+private job configuration. The archive stage, configuration stage, and VM
+admission each use a separate authenticated connection. The configuration
+stage reads the exact sealed snapshot under a fresh GitHub assignment proof.
+
+Keep the first run's sealed files and GitHub job evidence when preparation
+ends before VM admission. A later protected Main run starts its own
+configuration and admission from its own job identity.
+
+Record VM creation and the native job outcome for each operating case. The
+four-hour retention period for a failed cell starts at the native job's
+completion time. Keep the local alarm receipt, automatic cleanup result,
+and independent resource inventory with the operating evidence.
+
 ## Explicit remote TLS cells
 
 The existing local transport remains the default. The new `tls` transport is a
