@@ -169,6 +169,9 @@
           and keycloak_deploy_systemd_description | trim | length > 0
           and '\n' not in keycloak_deploy_systemd_description
           and '\r' not in keycloak_deploy_systemd_description
+          and keycloak_deploy_pod_manifest_path is string
+          and '\n' not in keycloak_deploy_pod_manifest_path
+          and '\r' not in keycloak_deploy_pod_manifest_path
         )
       - >-
         not (keycloak_deploy_manage_systemd | bool)

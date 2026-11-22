@@ -244,19 +244,31 @@
 
     - name: Cut over to native PostgreSQL Quadlet with rollback
       block:
-        - name: Stage the native PostgreSQL Quadlet before lifecycle mutation
-          ansible.builtin.include_role:
-            name: lit.foundational.podman_systemd
-          vars:
-            podman_systemd_action: stopped
-            podman_systemd_unit_name: "{{ postgres_deploy_systemd_unit_name }}"
-            podman_systemd_description: "{{ postgres_deploy_systemd_description }}"
-            podman_systemd_manifest_path: "{{ postgres_deploy_pod_manifest_path }}"
-            podman_systemd_scope: "{{ postgres_deploy_systemd_scope }}"
-            podman_systemd_quadlet_dir: "{{ postgres_deploy_quadlet_dir }}"
-            podman_systemd_enabled: false
-            podman_systemd_networks: "{{ postgres_deploy_networks }}"
+        - name: Ensure the native PostgreSQL Quadlet directory exists
+          ansible.builtin.file:
+            path: "{{ postgres_deploy_quadlet_dir }}"
+            state: directory
+            mode: '0755'
           when: not (postgres_deploy_native_quadlet_file.stat.exists | default(false))
+
+        - name: Stage the native PostgreSQL Quadlet before lifecycle mutation
+          ansible.builtin.template:
+            src: postgres-staged.kube.j2
+            dest: "{{ postgres_deploy_quadlet_dir }}/{{ postgres_deploy_systemd_unit_name }}.kube"
+            owner: root
+            group: root
+            mode: '0644'
+            force: false
+          register: postgres_deploy_staged_quadlet_render
+          when: not (postgres_deploy_native_quadlet_file.stat.exists | default(false))
+
+        # A stopped service action does not stage a missing Quadlet. Reload the
+        # boot-disabled definition here so provenance is checked before any stop.
+        - name: Reload the temporarily staged PostgreSQL Quadlet  # noqa: no-handler
+          ansible.builtin.systemd:
+            daemon_reload: true
+            scope: "{{ postgres_deploy_systemd_scope }}"
+          when: postgres_deploy_staged_quadlet_render.changed | default(false)
 
         - name: Reinspect the staged native PostgreSQL Quadlet
           ansible.builtin.stat:
@@ -294,6 +306,10 @@
         - name: Require the staged native PostgreSQL Quadlet provenance boundary
           ansible.builtin.assert:
             that:
+              - postgres_deploy_staged_quadlet_render.changed | default(false)
+              - >-
+                postgres_deploy_staged_quadlet_file.stat.checksum | default('')
+                == postgres_deploy_staged_quadlet_render.checksum
               - postgres_deploy_staged_quadlet_file.stat.isreg | default(false)
               - not (postgres_deploy_staged_quadlet_file.stat.islnk | default(false))
               - postgres_deploy_staged_quadlet_file.stat.mode | default('') == '0644'
@@ -439,7 +455,8 @@
 
         - name: Attempt failed native PostgreSQL cleanup without blocking restoration
           block:
-            - name: Remove the transaction-created native PostgreSQL Quadlet
+            # Rollback must complete inside this rescue before restoring the manifest.
+            - name: Remove the transaction-created native PostgreSQL Quadlet  # noqa: no-handler
               ansible.builtin.include_role:
                 name: lit.foundational.podman_systemd
               vars:
@@ -451,7 +468,7 @@
                 podman_systemd_quadlet_dir: "{{ postgres_deploy_quadlet_dir }}"
                 podman_systemd_enabled: false
                 podman_systemd_networks: "{{ postgres_deploy_networks }}"
-              when: not (postgres_deploy_native_quadlet_file.stat.exists | default(false))
+              when: postgres_deploy_staged_quadlet_render.changed | default(false)
 
           rescue:
             - name: Capture failed native PostgreSQL cleanup

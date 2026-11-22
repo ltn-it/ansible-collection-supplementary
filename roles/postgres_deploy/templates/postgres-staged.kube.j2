@@ -1,0 +1,10 @@
+[Unit]
+Description={{ postgres_deploy_systemd_description }}
+After=network-online.target
+Wants=network-online.target
+
+[Kube]
+Yaml={{ postgres_deploy_pod_manifest_path }}
+{% for network in postgres_deploy_networks %}
+Network={{ network }}
+{% endfor %}
