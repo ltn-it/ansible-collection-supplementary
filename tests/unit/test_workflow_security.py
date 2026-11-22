@@ -992,7 +992,12 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             ({"event.before": census_recovery_before}, True),
             ({"event.before": sealed_intake_before}, True),
             (
-                {"event.before": sealed_intake_before, "actor": "litdeg", "actor_id": "247824904", "triggering_actor": "litdeg"},
+                {
+                    "event.before": sealed_intake_before,
+                    "actor": "litdeg",
+                    "actor_id": "247824904",
+                    "triggering_actor": "litdeg",
+                },
                 True,
             ),
             ({"event.before": sealed_intake_before, "run_attempt": "2"}, False),
