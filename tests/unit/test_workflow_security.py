@@ -813,7 +813,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             self.assertEqual(
                 "ltn-it/modulix-validation/.github/workflows/"
                 "collection-quality-profile-isolated.yml@"
-                "adad3057ede6e12a9a5ff02de8f762467f5fad60",
+                "a936e9ea75af84e6b47fc23cd8f11f8a000a52ed",
                 delegated["uses"],
             )
             self.assertNotIn("environment-name", delegated["with"])
@@ -887,6 +887,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         terminal_prelease_failure = "5604f19544f97b572272496fd61f5c4949d45fba"
         closed_preparation = "e403e0fffa9318be82718b29e854ab7a3a6da98c"
         podman_repair_before = "69d2ccf034dfe5c64c0fda8fc037569fc9b96ff6"
+        census_recovery_before = "e42b0cdd65536e3749f6c405ec23955e5aaa419b"
         partial_preparation_failure = "86f3cb46e5856c4066cac14e73f46c3cefb8453e"
         baseline = {
             "repository": "ltn-it/ansible-collection-supplementary",
@@ -987,6 +988,20 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             ({"event.before": podman_repair_before, "event_name": "workflow_dispatch"}, False),
             ({"event.before": podman_repair_before, "ref": "refs/heads/develop"}, False),
             ({"event.before": podman_repair_before, "triggering_actor": "litdeg"}, False),
+            ({"event.before": census_recovery_before}, True),
+            (
+                {
+                    "event.before": census_recovery_before,
+                    "actor": "litdeg",
+                    "actor_id": "247824904",
+                    "triggering_actor": "litdeg",
+                },
+                True,
+            ),
+            ({"event.before": census_recovery_before, "run_attempt": "2"}, False),
+            ({"event.before": census_recovery_before, "event_name": "workflow_dispatch"}, False),
+            ({"event.before": census_recovery_before, "ref": "refs/heads/develop"}, False),
+            ({"event.before": census_recovery_before, "triggering_actor": "litdeg"}, False),
             (
                 {
                     "event.before": partial_preparation_failure,
@@ -1106,6 +1121,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                     terminal_prelease_failure,
                     closed_preparation,
                     podman_repair_before,
+                    census_recovery_before,
                 ],
                 windows,
             )
