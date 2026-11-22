@@ -35,7 +35,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  G06_VALIDATION_CONTROLLER_SHA: adad3057ede6e12a9a5ff02de8f762467f5fad60
+  G06_VALIDATION_CONTROLLER_SHA: a936e9ea75af84e6b47fc23cd8f11f8a000a52ed
   PYTHON_VERSION: "3.11"
   ANSIBLE_CORE_VERSION: "2.18.18"
   COLLECTION_NAMESPACE: lit
@@ -819,7 +819,7 @@ jobs:
       actions: read
       checks: read
       id-token: write
-    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@adad3057ede6e12a9a5ff02de8f762467f5fad60
+    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@a936e9ea75af84e6b47fc23cd8f11f8a000a52ed
     with:
       profile: heavy
       matrix-json: ${{ needs.quality-matrix.outputs.heavy }}
@@ -867,7 +867,7 @@ jobs:
       actions: read
       checks: read
       id-token: write
-    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@adad3057ede6e12a9a5ff02de8f762467f5fad60
+    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@a936e9ea75af84e6b47fc23cd8f11f8a000a52ed
     with:
       profile: application_acceptance
       matrix-json: ${{ needs.quality-matrix.outputs.acceptance }}
@@ -917,7 +917,8 @@ jobs:
        github.event.before == '86f3cb46e5856c4066cac14e73f46c3cefb8453e' ||
        github.event.before == '5604f19544f97b572272496fd61f5c4949d45fba' ||
        github.event.before == 'e403e0fffa9318be82718b29e854ab7a3a6da98c' ||
-       github.event.before == '69d2ccf034dfe5c64c0fda8fc037569fc9b96ff6') &&
+       github.event.before == '69d2ccf034dfe5c64c0fda8fc037569fc9b96ff6' ||
+       github.event.before == 'e42b0cdd65536e3749f6c405ec23955e5aaa419b') &&
       github.run_attempt == 1 &&
       ((github.actor == 'litroc' && github.actor_id == '76040632') ||
        (github.actor == 'litdeg' && github.actor_id == '247824904')) &&
@@ -928,7 +929,7 @@ jobs:
       actions: read
       checks: read
       id-token: write
-    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@adad3057ede6e12a9a5ff02de8f762467f5fad60
+    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@a936e9ea75af84e6b47fc23cd8f11f8a000a52ed
     with:
       profile: operating
       operating-case: failure
@@ -955,7 +956,8 @@ jobs:
        github.event.before == '86f3cb46e5856c4066cac14e73f46c3cefb8453e' ||
        github.event.before == '5604f19544f97b572272496fd61f5c4949d45fba' ||
        github.event.before == 'e403e0fffa9318be82718b29e854ab7a3a6da98c' ||
-       github.event.before == '69d2ccf034dfe5c64c0fda8fc037569fc9b96ff6') &&
+       github.event.before == '69d2ccf034dfe5c64c0fda8fc037569fc9b96ff6' ||
+       github.event.before == 'e42b0cdd65536e3749f6c405ec23955e5aaa419b') &&
       github.run_attempt == 1 &&
       ((github.actor == 'litroc' && github.actor_id == '76040632') ||
        (github.actor == 'litdeg' && github.actor_id == '247824904')) &&
@@ -966,7 +968,7 @@ jobs:
       actions: read
       checks: read
       id-token: write
-    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@adad3057ede6e12a9a5ff02de8f762467f5fad60
+    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@a936e9ea75af84e6b47fc23cd8f11f8a000a52ed
     with:
       profile: operating
       operating-case: broker-cancel
@@ -993,7 +995,8 @@ jobs:
        github.event.before == '86f3cb46e5856c4066cac14e73f46c3cefb8453e' ||
        github.event.before == '5604f19544f97b572272496fd61f5c4949d45fba' ||
        github.event.before == 'e403e0fffa9318be82718b29e854ab7a3a6da98c' ||
-       github.event.before == '69d2ccf034dfe5c64c0fda8fc037569fc9b96ff6') &&
+       github.event.before == '69d2ccf034dfe5c64c0fda8fc037569fc9b96ff6' ||
+       github.event.before == 'e42b0cdd65536e3749f6c405ec23955e5aaa419b') &&
       github.run_attempt == 1 &&
       ((github.actor == 'litroc' && github.actor_id == '76040632') ||
        (github.actor == 'litdeg' && github.actor_id == '247824904')) &&
@@ -1004,7 +1007,7 @@ jobs:
       actions: read
       checks: read
       id-token: write
-    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@adad3057ede6e12a9a5ff02de8f762467f5fad60
+    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@a936e9ea75af84e6b47fc23cd8f11f8a000a52ed
     with:
       profile: operating
       operating-case: expiry-controller-loss
