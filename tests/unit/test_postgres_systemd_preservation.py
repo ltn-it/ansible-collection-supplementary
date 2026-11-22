@@ -129,7 +129,7 @@ class PostgresSystemdPreservationTests(unittest.TestCase):
     dest: "{{ podman_systemd_quadlet_dir }}/{{ podman_systemd_unit_name }}.kube"
     content: "[Kube]\nYaml={{ podman_systemd_manifest_path }}\n"
     mode: '0644'
-  when: podman_systemd_action != 'absent'
+  when: podman_systemd_action not in ['absent', 'stopped']
 
 - name: Apply fixture service action
   ansible.builtin.command:
@@ -183,6 +183,10 @@ class PostgresSystemdPreservationTests(unittest.TestCase):
             group: {os.getegid()}
             mode: '0600'
 """,
+                )
+                .replace(
+                    "            owner: root\n            group: root\n            mode: '0644'\n",
+                    f"            owner: {os.geteuid()}\n            group: {os.getegid()}\n            mode: '0644'\n",
                 )
                 .replace(
                     "postgres_deploy_staged_quadlet_file.stat.pw_name | default('') == 'root'",

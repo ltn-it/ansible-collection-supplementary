@@ -57,6 +57,9 @@
           and postgres_deploy_systemd_description | trim | length > 0
           and '\n' not in postgres_deploy_systemd_description
           and '\r' not in postgres_deploy_systemd_description
+          and postgres_deploy_pod_manifest_path is string
+          and '\n' not in postgres_deploy_pod_manifest_path
+          and '\r' not in postgres_deploy_pod_manifest_path
         )
       - >-
         not (postgres_deploy_manage_systemd | bool)
