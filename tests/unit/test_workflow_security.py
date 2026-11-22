@@ -813,7 +813,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             self.assertEqual(
                 "ltn-it/modulix-validation/.github/workflows/"
                 "collection-quality-profile-isolated.yml@"
-                "bba96362be83c030e6813d9219744a54b296c4b3",
+                "46d298f20ffb597477c23ee6262887b937e2c997",
                 delegated["uses"],
             )
             self.assertNotIn("environment-name", delegated["with"])
@@ -889,6 +889,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         podman_repair_before = "69d2ccf034dfe5c64c0fda8fc037569fc9b96ff6"
         census_recovery_before = "e42b0cdd65536e3749f6c405ec23955e5aaa419b"
         sealed_intake_before = "8edd19c61a8faffe10d6c570cc3ad8338750f475"
+        engine_retirement_before = "5759a628d9fadb258036390483cb158c8ea36570"
         partial_preparation_failure = "86f3cb46e5856c4066cac14e73f46c3cefb8453e"
         baseline = {
             "repository": "ltn-it/ansible-collection-supplementary",
@@ -1005,6 +1006,21 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             ({"event.before": sealed_intake_before, "ref": "refs/heads/develop"}, False),
             ({"event.before": sealed_intake_before, "triggering_actor": "litdeg"}, False),
             ({"event.before": sealed_intake_before[:-1] + "4"}, False),
+            ({"event.before": engine_retirement_before}, True),
+            (
+                {
+                    "event.before": engine_retirement_before,
+                    "actor": "litdeg",
+                    "actor_id": "247824904",
+                    "triggering_actor": "litdeg",
+                },
+                True,
+            ),
+            ({"event.before": engine_retirement_before, "run_attempt": "2"}, False),
+            ({"event.before": engine_retirement_before, "event_name": "workflow_dispatch"}, False),
+            ({"event.before": engine_retirement_before, "ref": "refs/heads/develop"}, False),
+            ({"event.before": engine_retirement_before, "triggering_actor": "litdeg"}, False),
+            ({"event.before": engine_retirement_before[:-1] + "1"}, False),
             (
                 {
                     "event.before": census_recovery_before,
@@ -1139,6 +1155,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                     podman_repair_before,
                     census_recovery_before,
                     sealed_intake_before,
+                    engine_retirement_before,
                 ],
                 windows,
             )

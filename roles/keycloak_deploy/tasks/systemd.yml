@@ -243,19 +243,31 @@
 
     - name: Cut over to native Keycloak Quadlet with rollback
       block:
-        - name: Stage the native Keycloak Quadlet before lifecycle mutation
-          ansible.builtin.include_role:
-            name: lit.foundational.podman_systemd
-          vars:
-            podman_systemd_action: stopped
-            podman_systemd_unit_name: "{{ keycloak_deploy_systemd_unit_name }}"
-            podman_systemd_description: "{{ keycloak_deploy_systemd_description }}"
-            podman_systemd_manifest_path: "{{ keycloak_deploy_pod_manifest_path }}"
-            podman_systemd_scope: "{{ keycloak_deploy_systemd_scope }}"
-            podman_systemd_quadlet_dir: "{{ keycloak_deploy_quadlet_dir }}"
-            podman_systemd_enabled: false
-            podman_systemd_networks: "{{ keycloak_deploy_networks }}"
+        - name: Ensure the native Keycloak Quadlet directory exists
+          ansible.builtin.file:
+            path: "{{ keycloak_deploy_quadlet_dir }}"
+            state: directory
+            mode: '0755'
           when: not (keycloak_deploy_native_quadlet_file.stat.exists | default(false))
+
+        - name: Stage the native Keycloak Quadlet before lifecycle mutation
+          ansible.builtin.template:
+            src: keycloak-staged.kube.j2
+            dest: "{{ keycloak_deploy_quadlet_dir }}/{{ keycloak_deploy_systemd_unit_name }}.kube"
+            owner: root
+            group: root
+            mode: '0644'
+            force: false
+          register: keycloak_deploy_staged_quadlet_render
+          when: not (keycloak_deploy_native_quadlet_file.stat.exists | default(false))
+
+        # A stopped service action does not stage a missing Quadlet. Reload the
+        # boot-disabled definition here so provenance is checked before any stop.
+        - name: Reload the temporarily staged Keycloak Quadlet  # noqa: no-handler
+          ansible.builtin.systemd:
+            daemon_reload: true
+            scope: "{{ keycloak_deploy_systemd_scope }}"
+          when: keycloak_deploy_staged_quadlet_render.changed | default(false)
 
         - name: Reinspect the staged native Keycloak Quadlet
           ansible.builtin.stat:
@@ -293,6 +305,10 @@
         - name: Require the staged native Keycloak Quadlet provenance boundary
           ansible.builtin.assert:
             that:
+              - keycloak_deploy_staged_quadlet_render.changed | default(false)
+              - >-
+                keycloak_deploy_staged_quadlet_file.stat.checksum | default('')
+                == keycloak_deploy_staged_quadlet_render.checksum
               - keycloak_deploy_staged_quadlet_file.stat.isreg | default(false)
               - not (keycloak_deploy_staged_quadlet_file.stat.islnk | default(false))
               - keycloak_deploy_staged_quadlet_file.stat.mode | default('') == '0644'
@@ -492,7 +508,8 @@
 
         - name: Attempt failed native Keycloak cleanup without blocking restoration
           block:
-            - name: Remove the transaction-created native Keycloak Quadlet
+            # Rollback must complete inside this rescue before restoring the manifest.
+            - name: Remove the transaction-created native Keycloak Quadlet  # noqa: no-handler
               ansible.builtin.include_role:
                 name: lit.foundational.podman_systemd
               vars:
@@ -504,7 +521,7 @@
                 podman_systemd_quadlet_dir: "{{ keycloak_deploy_quadlet_dir }}"
                 podman_systemd_enabled: false
                 podman_systemd_networks: "{{ keycloak_deploy_networks }}"
-              when: not (keycloak_deploy_native_quadlet_file.stat.exists | default(false))
+              when: keycloak_deploy_staged_quadlet_render.changed | default(false)
 
           rescue:
             - name: Capture failed native Keycloak cleanup

@@ -1,0 +1,10 @@
+[Unit]
+Description={{ keycloak_deploy_systemd_description }}
+After=network-online.target
+Wants=network-online.target
+
+[Kube]
+Yaml={{ keycloak_deploy_pod_manifest_path }}
+{% for network in keycloak_deploy_networks %}
+Network={{ network }}
+{% endfor %}

@@ -1,0 +1,5 @@
+---
+bugfixes:
+  - >-
+    PostgreSQL and Keycloak stage a boot-disabled Quadlet before takeover.
+    This preserves the existing provenance and rollback checks with Foundational 1.39 and later.
