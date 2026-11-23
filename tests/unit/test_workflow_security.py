@@ -813,7 +813,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             self.assertEqual(
                 "ltn-it/modulix-validation/.github/workflows/"
                 "collection-quality-profile-isolated.yml@"
-                "39c83ce8bbfda2fbf3c702522c986ed3b993eee4",
+                "8119a37204a97040f035f23ab94e3ca50345b736",
                 delegated["uses"],
             )
             self.assertNotIn("environment-name", delegated["with"])
@@ -892,6 +892,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         engine_retirement_before = "5759a628d9fadb258036390483cb158c8ea36570"
         ledger_read_before = "a2d4a7e906eec88b250af82375d82592f9b2380f"
         podman_cid_before = "33c97bee9d37f3b1901765d5ffc59a79823c7534"
+        podman_netns_before = "d2490ec0841ff5c372840aae06ce75a3d5a3f627"
         partial_preparation_failure = "86f3cb46e5856c4066cac14e73f46c3cefb8453e"
         baseline = {
             "repository": "ltn-it/ansible-collection-supplementary",
@@ -904,6 +905,11 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             "triggering_actor": "litroc",
         }
         examples = [
+            ({"event.before": podman_netns_before}, True),
+            ({"event.before": podman_netns_before[:-1]}, False),
+            ({"event.before": podman_netns_before, "run_attempt": "2"}, False),
+            ({"event.before": podman_netns_before, "event_name": "workflow_dispatch"}, False),
+            ({"event.before": podman_netns_before, "actor_id": "247824904"}, False),
             ({}, True),
             ({"event.before": followup}, True),
             (
@@ -1190,6 +1196,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                     engine_retirement_before,
                     ledger_read_before,
                     podman_cid_before,
+                    podman_netns_before,
                 ],
                 windows,
             )
