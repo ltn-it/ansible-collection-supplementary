@@ -1,0 +1,23 @@
+{
+  "schema": "ltn399-push-ready-origin-adoption/v1",
+  "work_item": "LTN-399",
+  "repository": "ltn-it/ansible-collection-supplementary",
+  "target_path": "scripts/lit-push-ready.py",
+  "previous_sha256": "e2ffdb26feebf9e58d9e4d4d389941cd041fe72b1e3e37fb891f2b6e0b895231",
+  "sha256": "26d28b0ed36f8aeca4fbb7c4454cdedaa5b6fc075492df09624cbae9cb335adc",
+  "mode": "adapted-local",
+  "source": {
+    "repository": "ltn-it/shared-assets-lit",
+    "ref": "refs/heads/develop",
+    "commit": "9b3f2383bb02eba74c76933e49e0a0a1d3d0f32d",
+    "tree": "eab0af3194aa8c4beb1f7af56d52c4eea11f02f7",
+    "path": "default/scripts/lit-push-ready.py",
+    "blob": "e19d4d62730a06e409558adb1d4ebdc62d5629ac",
+    "sha256": "11e09e294a8f82b25b0269fcece8fea90341d28ba9ae2e9ba3e6b9cc706ea077",
+    "function": "governed_push_remote_from_url",
+    "function_sha256": "1ff9ad3193621e06a4030a51094bc8d62eae13f8ea1972b585e3454ead7b94c2",
+    "function_semantic_sha256": "4f1a91acf5c89e5c7f7146894aa3cbed2072425e783955915c798d33e049b09f"
+  },
+  "scope": "Preserve exact owner in governed origin identity; accept only ltn-it or historical lightning-it on github.com. Historical LI-219/LI-259/LI-319 receipts remain unchanged.",
+  "receipt_sha256": "90ee7e3d27d51b05d9397f67268ce1ae8569f59a34171fb8fac4def9233e4ccc"
+}

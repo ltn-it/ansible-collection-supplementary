@@ -24,6 +24,10 @@ forward_proxy_port: 3128
 forward_proxy_allowed_clients:
   - 127.0.0.1/32
 forward_proxy_allowed_destination_domains: []
+# Optional exact source-to-domain policy. An empty mapping retains the legacy
+# shared allowlist for existing consumers; a nonempty mapping must cover every
+# allowed client and may only use domains in the declared global inventory.
+forward_proxy_destination_domains_by_client: {}
 forward_proxy_allowed_destination_ports:
   - 80
   - 443
