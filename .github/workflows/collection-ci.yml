@@ -35,7 +35,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  G06_VALIDATION_CONTROLLER_SHA: b4f20cabac40353b30c8602f0e8cb47bc9e77ea3
+  G06_VALIDATION_CONTROLLER_SHA: 69b7f805734e4d3b08d102e7d7a25108f78da247
   PYTHON_VERSION: "3.11"
   ANSIBLE_CORE_VERSION: "2.18.18"
   COLLECTION_NAMESPACE: lit
@@ -819,7 +819,7 @@ jobs:
       actions: read
       checks: read
       id-token: write
-    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@b4f20cabac40353b30c8602f0e8cb47bc9e77ea3
+    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@69b7f805734e4d3b08d102e7d7a25108f78da247
     with:
       profile: heavy
       matrix-json: ${{ needs.quality-matrix.outputs.heavy }}
@@ -867,7 +867,7 @@ jobs:
       actions: read
       checks: read
       id-token: write
-    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@b4f20cabac40353b30c8602f0e8cb47bc9e77ea3
+    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@69b7f805734e4d3b08d102e7d7a25108f78da247
     with:
       profile: application_acceptance
       matrix-json: ${{ needs.quality-matrix.outputs.acceptance }}
@@ -935,7 +935,7 @@ jobs:
       actions: read
       checks: read
       id-token: write
-    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@b4f20cabac40353b30c8602f0e8cb47bc9e77ea3
+    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@69b7f805734e4d3b08d102e7d7a25108f78da247
     with:
       profile: operating
       operating-case: failure
@@ -980,7 +980,7 @@ jobs:
       actions: read
       checks: read
       id-token: write
-    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@b4f20cabac40353b30c8602f0e8cb47bc9e77ea3
+    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@69b7f805734e4d3b08d102e7d7a25108f78da247
     with:
       profile: operating
       operating-case: broker-cancel
@@ -1025,7 +1025,7 @@ jobs:
       actions: read
       checks: read
       id-token: write
-    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@b4f20cabac40353b30c8602f0e8cb47bc9e77ea3
+    uses: ltn-it/modulix-validation/.github/workflows/collection-quality-profile-isolated.yml@69b7f805734e4d3b08d102e7d7a25108f78da247
     with:
       profile: operating
       operating-case: expiry-controller-loss
