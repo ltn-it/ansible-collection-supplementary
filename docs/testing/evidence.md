@@ -73,6 +73,16 @@ verifies the original terminal outcome, the empty lease bank, and the
 preserved archive. Record the successor's result after its signed native
 finalization.
 
+## Failure after workload startup
+
+Keep the failed native job, its sealed inputs, terminal lease record, and complete
+private execution capture bound to the original run. The runner verifies exactly
+which resources that lease created, including any private copy of the VM image.
+Before admitting a successor test, independently confirm that those resources
+and consumers are absent and that the original evidence is still readable.
+An empty Incus project establishes current absence. A successful retirement
+does not change the failed job result or establish application acceptance.
+
 ## Physical finalization survives reaggregation
 
 A preliminary Root cell is diagnostic evidence (`root_finalization: pending`),
