@@ -292,6 +292,12 @@ class RoleCoverageRegistryTests(unittest.TestCase):
                 self.assertEqual("container" if profile == "tiny" else "vm", cell["instance_type"])
                 self.assertIsInstance(cell["runner"], list)
                 self.assertTrue(("image" in cell) ^ ("image_variable" in cell))
+                self.assertEqual(
+                    "images:ubuntu/24.04"
+                    if profile == "tiny"
+                    else "38a97063887ebedb3596275e498ee5da4bb0508c28f14d247118d6205fc8cc9c",
+                    cell["image"],
+                )
                 self.assertTrue(cell["junit"] and cell["allure"] and cell["evidence"])
 
     def test_shared_production_scenario_rejects_asymmetric_target_sets(self) -> None:
@@ -356,7 +362,10 @@ class RoleCoverageRegistryTests(unittest.TestCase):
         old = VALIDATOR.build_matrix(registry, "heavy")["include"][0]
         current = VALIDATOR.build_matrix(self.registry, "heavy")["include"][0]
         self.assertEqual("container", old["instance_type"])
-        self.assertEqual(old | {"instance_type": "vm"}, current)
+        self.assertEqual("images:ubuntu/24.04", old["image"])
+        self.assertEqual(
+            old | {"instance_type": "vm", "image": registry["targets"]["ubuntu-24.04"]["offline_vm_image"]}, current
+        )
         self.assertEqual(VALIDATOR.build_matrix(registry, "tiny"), VALIDATOR.build_matrix(self.registry, "tiny"))
 
     def test_explicit_invalid_instance_type_denies_without_silent_target_fallback(self) -> None:

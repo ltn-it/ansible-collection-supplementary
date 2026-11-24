@@ -1140,6 +1140,11 @@ def validate_registry(
             errors.append(f"target {name}.image contains unsafe characters or is too long")
         elif images[0] == "image_variable" and SAFE_IMAGE_VARIABLE.fullmatch(target[images[0]]) is None:
             errors.append(f"target {name}.image_variable must be a safe uppercase variable name")
+        if "offline_vm_image" in target and (
+            not isinstance(target["offline_vm_image"], str)
+            or re.fullmatch(r"[a-f0-9]{64}", target["offline_vm_image"]) is None
+        ):
+            errors.append(f"target {name}.offline_vm_image must be a full Incus fingerprint")
         if target.get("instance_type") not in {"container", "vm"}:
             errors.append(f"target {name}.instance_type must be container or vm")
         runner = _require_string_list(target.get("runner"), f"target {name}.runner", errors)
@@ -1526,6 +1531,8 @@ def render_document(registry: dict[str, Any]) -> str:
             "A scenario may explicitly declare `instance_type: container` or `instance_type: vm`; "
             "otherwise its matrix cells retain the target's instance type. This execution setting "
             "does not change scenario eligibility, role maturity, target disposition, or release requirements.",
+            "A target may provide an offline Incus image fingerprint for isolated Heavy and "
+            "Application Acceptance VMs.",
             "",
             "| Scenario | Profile | State | Implementation | Reported roles | "
             "Exercised dependencies | Test application mode | Application claims | "
@@ -1637,7 +1644,13 @@ def build_matrix(
                 "allure": scenario["allure"],
                 "evidence": scenario["evidence"],
             }
-            if "image" in target_definition:
+            if (
+                profile in {"heavy", "application_acceptance"}
+                and instance_type == "vm"
+                and "offline_vm_image" in target_definition
+            ):
+                cell["image"] = target_definition["offline_vm_image"]
+            elif "image" in target_definition:
                 cell["image"] = target_definition["image"]
             else:
                 cell["image_variable"] = target_definition["image_variable"]
