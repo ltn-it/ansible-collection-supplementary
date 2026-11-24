@@ -63,6 +63,16 @@ python3 scripts/quality_evidence.py assemble
 python3 scripts/quality_evidence.py validate
 ```
 
+## Failure after input sealing
+
+A protected job can fail after sealing its inputs and before issuing an Incus
+lease. Keep the sealed archive and the terminal job outcome bound to that
+original run. A successor business test requires its own protected Main push
+and a fresh input snapshot. Before admitting it, the runner's root controller
+verifies the original terminal outcome, the empty lease bank, and the
+preserved archive. Record the successor's result after its signed native
+finalization.
+
 ## Physical finalization survives reaggregation
 
 A preliminary Root cell is diagnostic evidence (`root_finalization: pending`),
