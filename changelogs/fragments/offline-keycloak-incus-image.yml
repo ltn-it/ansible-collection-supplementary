@@ -1,0 +1,5 @@
+---
+bugfixes:
+  - >-
+    keycloak - select the exact locally cached Ubuntu VM image for isolated Heavy and
+    Application Acceptance validation and use the offline archive test controller.

@@ -55,6 +55,7 @@ targets:
     family: "Debian"
     version: "24.04"
     image: "images:ubuntu/24.04"
+    offline_vm_image: "38a97063887ebedb3596275e498ee5da4bb0508c28f14d247118d6205fc8cc9c"
     instance_type: "container"
     runner:
       - "self-hosted"
