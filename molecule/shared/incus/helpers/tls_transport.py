@@ -296,13 +296,13 @@ class PinnedConnection(http.client.HTTPSConnection):
 class PinnedHandler(urllib.request.HTTPSHandler):
     def __init__(self, tls):
         self.tls = tls
-        super().__init__(context=tls.context, check_hostname=False)
+        super().__init__(context=tls.context)
 
     def https_open(self, req):
         def connection(host, **kwargs):
             return PinnedConnection(host, peer_sha256=self.tls.peer_sha256, **kwargs)
 
-        return self.do_open(connection, req, context=self.tls.context, check_hostname=False)
+        return self.do_open(connection, req, context=self.tls.context)
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
