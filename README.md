@@ -366,8 +366,9 @@ does not establish collector health; the accepted package and measured complete
 authentication budget remain mandatory.
 This caller condition grants no lease or retry authority. Both ordinary profiles
 must pass before the serial failure, broker cancellation and expiry cases run.
-Actual four-hour retention, cleanup and local root-mail delivery remain required;
-a skipped case or successful local test does not satisfy operating acceptance.
+Operating acceptance requires the original native outcome, verified withdrawal
+and VM stop, preserved failure evidence, an independent inventory confirming
+cleanup, and local Root-mail delivery.
 
 ## Local checks
 

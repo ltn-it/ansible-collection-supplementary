@@ -813,7 +813,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             self.assertEqual(
                 "ltn-it/modulix-validation/.github/workflows/"
                 "collection-quality-profile-isolated.yml@"
-                "69b7f805734e4d3b08d102e7d7a25108f78da247",
+                "b25236cc594fee06854ee524d6ab87004255b70f",
                 delegated["uses"],
             )
             self.assertNotIn("environment-name", delegated["with"])
@@ -894,6 +894,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         podman_cid_before = "33c97bee9d37f3b1901765d5ffc59a79823c7534"
         podman_netns_before = "d2490ec0841ff5c372840aae06ce75a3d5a3f627"
         failed_capacity_before = "8cf199eedd68e653f97a4739a5d0b2e7235f91f5"
+        closed_custody_before = "aca24665c7d0e192974e1bb030737a349c6b70db"
         partial_preparation_failure = "86f3cb46e5856c4066cac14e73f46c3cefb8453e"
         baseline = {
             "repository": "ltn-it/ansible-collection-supplementary",
@@ -906,6 +907,10 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             "triggering_actor": "litroc",
         }
         examples = [
+            ({"event.before": closed_custody_before}, True),
+            ({"event.before": closed_custody_before[:-1]}, False),
+            ({"event.before": closed_custody_before, "run_attempt": "2"}, False),
+            ({"event.before": closed_custody_before, "event_name": "workflow_dispatch"}, False),
             ({"event.before": failed_capacity_before}, True),
             ({"event.before": failed_capacity_before + "0"}, False),
             ({"event.before": failed_capacity_before, "run_attempt": "2"}, False),
@@ -1203,6 +1208,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                     podman_cid_before,
                     podman_netns_before,
                     failed_capacity_before,
+                    closed_custody_before,
                 ],
                 windows,
             )
