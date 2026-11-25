@@ -1552,6 +1552,7 @@ def _fallback_junit(root: Path, identity: Identity, reason: str) -> tuple[str, d
         ("scenario", identity.scenario),
         ("target", identity.target),
         ("run_attempt", identity.run_attempt),
+        ("commit_sha", _tested_commit()),
         ("framework", "evidence-fallback"),
     ):
         ET.SubElement(properties, "property", {"name": name, "value": value})

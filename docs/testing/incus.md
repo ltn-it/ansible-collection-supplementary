@@ -100,10 +100,10 @@ Keep the first run's sealed files and GitHub job evidence when preparation
 ends before VM admission. A later protected Main run starts its own
 configuration and admission from its own job identity.
 
-Record VM creation and the native job outcome for each operating case. The
-four-hour retention period for a failed cell starts at the native job's
-completion time. Keep the local alarm receipt, automatic cleanup result,
-and independent resource inventory with the operating evidence.
+Record VM creation and the native job outcome for each operating case. Root
+starts cleanup as soon as it verifies the stopped VM, withdrawn access and
+preserved failure evidence for the original job. Keep the local alarm receipt,
+cleanup result and independent resource inventory with the operating evidence.
 
 ## Explicit remote TLS cells
 

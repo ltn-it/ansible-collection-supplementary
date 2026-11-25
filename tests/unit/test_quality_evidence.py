@@ -571,7 +571,13 @@ class QualityEvidenceTests(unittest.TestCase):
         manifest = json.loads((self.evidence_root / "manifest.json").read_text(encoding="utf-8"))
         self.assertFalse(manifest["release_eligible"])
         self.assertEqual(manifest["results"][0]["status"], "infrastructure-error")
-        self.assertTrue(manifest["results"][0]["junit"])
+        (relative,) = manifest["results"][0]["junit"]
+        fallback = evidence.parse_junit(self.evidence_root / relative)
+        self.assertEqual(evidence._report_commit(fallback), manifest["commit_sha"])
+        self.assertNotIn(
+            "does not identify the exact tested commit",
+            "\n".join(evidence._rederive_manifest_results(self.evidence_root, manifest)),
+        )
 
     def test_release_requires_security_and_rejects_commit_mismatch(self) -> None:
         sha = "b" * 40
