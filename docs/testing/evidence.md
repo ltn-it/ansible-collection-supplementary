@@ -73,6 +73,17 @@ verifies the original terminal outcome, the empty lease bank, and the
 preserved archive. Record the successor's result after its signed native
 finalization.
 
+## Failure after workload startup
+
+Keep the failed native job, its sealed inputs, terminal lease record, and complete
+private execution capture bound to the original run. The runner verifies exactly
+which resources that lease created, including any private copy of the VM image.
+An empty lease project establishes absence within that project. Before admitting
+a successor, Root independently verifies ownership of the affected resources,
+checks for consumers across the host, and confirms removal of the lease bridge
+from the default project. The retirement records resource absence alongside the
+original failed job and its preserved evidence.
+
 ## Physical finalization survives reaggregation
 
 A preliminary Root cell is diagnostic evidence (`root_finalization: pending`),
