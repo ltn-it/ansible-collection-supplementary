@@ -895,6 +895,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         podman_netns_before = "d2490ec0841ff5c372840aae06ce75a3d5a3f627"
         failed_capacity_before = "8cf199eedd68e653f97a4739a5d0b2e7235f91f5"
         closed_custody_before = "aca24665c7d0e192974e1bb030737a349c6b70db"
+        closed_c22_before = "af5a45eca7e7dcaa85af8bea3e6d77c775fd8b9a"
         partial_preparation_failure = "86f3cb46e5856c4066cac14e73f46c3cefb8453e"
         baseline = {
             "repository": "ltn-it/ansible-collection-supplementary",
@@ -907,6 +908,21 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             "triggering_actor": "litroc",
         }
         examples = [
+            ({"event.before": closed_c22_before}, True),
+            (
+                {
+                    "event.before": closed_c22_before,
+                    "actor": "litdeg",
+                    "actor_id": "247824904",
+                    "triggering_actor": "litdeg",
+                },
+                True,
+            ),
+            ({"event.before": closed_c22_before[:-1] + "b"}, False),
+            ({"event.before": closed_c22_before, "run_attempt": "2"}, False),
+            ({"event.before": closed_c22_before, "event_name": "workflow_dispatch"}, False),
+            ({"event.before": closed_c22_before, "ref": "refs/heads/develop"}, False),
+            ({"event.before": closed_c22_before, "triggering_actor": "litdeg"}, False),
             ({"event.before": closed_custody_before}, True),
             ({"event.before": closed_custody_before[:-1]}, False),
             ({"event.before": closed_custody_before, "run_attempt": "2"}, False),
@@ -1209,6 +1225,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                     podman_netns_before,
                     failed_capacity_before,
                     closed_custody_before,
+                    closed_c22_before,
                 ],
                 windows,
             )

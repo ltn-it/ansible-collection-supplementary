@@ -925,7 +925,8 @@ jobs:
        github.event.before == '33c97bee9d37f3b1901765d5ffc59a79823c7534' ||
        github.event.before == 'd2490ec0841ff5c372840aae06ce75a3d5a3f627' ||
        github.event.before == '8cf199eedd68e653f97a4739a5d0b2e7235f91f5' ||
-       github.event.before == 'aca24665c7d0e192974e1bb030737a349c6b70db') &&
+       github.event.before == 'aca24665c7d0e192974e1bb030737a349c6b70db' ||
+       github.event.before == 'af5a45eca7e7dcaa85af8bea3e6d77c775fd8b9a') &&
       github.run_attempt == 1 &&
       ((github.actor == 'litroc' && github.actor_id == '76040632') ||
        (github.actor == 'litdeg' && github.actor_id == '247824904')) &&
@@ -971,7 +972,8 @@ jobs:
        github.event.before == '33c97bee9d37f3b1901765d5ffc59a79823c7534' ||
        github.event.before == 'd2490ec0841ff5c372840aae06ce75a3d5a3f627' ||
        github.event.before == '8cf199eedd68e653f97a4739a5d0b2e7235f91f5' ||
-       github.event.before == 'aca24665c7d0e192974e1bb030737a349c6b70db') &&
+       github.event.before == 'aca24665c7d0e192974e1bb030737a349c6b70db' ||
+       github.event.before == 'af5a45eca7e7dcaa85af8bea3e6d77c775fd8b9a') &&
       github.run_attempt == 1 &&
       ((github.actor == 'litroc' && github.actor_id == '76040632') ||
        (github.actor == 'litdeg' && github.actor_id == '247824904')) &&
@@ -1017,7 +1019,8 @@ jobs:
        github.event.before == '33c97bee9d37f3b1901765d5ffc59a79823c7534' ||
        github.event.before == 'd2490ec0841ff5c372840aae06ce75a3d5a3f627' ||
        github.event.before == '8cf199eedd68e653f97a4739a5d0b2e7235f91f5' ||
-       github.event.before == 'aca24665c7d0e192974e1bb030737a349c6b70db') &&
+       github.event.before == 'aca24665c7d0e192974e1bb030737a349c6b70db' ||
+       github.event.before == 'af5a45eca7e7dcaa85af8bea3e6d77c775fd8b9a') &&
       github.run_attempt == 1 &&
       ((github.actor == 'litroc' && github.actor_id == '76040632') ||
        (github.actor == 'litdeg' && github.actor_id == '247824904')) &&
