@@ -1,0 +1,3 @@
+---
+bugfixes:
+  - Bind fallback JUnit infrastructure error evidence to the tested source commit.
