@@ -813,7 +813,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             self.assertEqual(
                 "ltn-it/modulix-validation/.github/workflows/"
                 "collection-quality-profile-isolated.yml@"
-                "ff6c4753af446077b1c0eedc3986c8b02bcb3159",
+                "0ee6d6410abaf5ceb8ceabeb5708ed2a1f112ade",
                 delegated["uses"],
             )
             self.assertNotIn("environment-name", delegated["with"])
@@ -898,6 +898,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         closed_c22_before = "af5a45eca7e7dcaa85af8bea3e6d77c775fd8b9a"
         prelease_c23_before = "98157a078b130bc6daa61adb5bc76e17e4acac2c"
         closed_c24_before = "e14d885efe872712030a144494b00df980acfa38"
+        closed_c25_before = "91f581f565ce21beb1b4ce3a59c71c8d332c951f"
         partial_preparation_failure = "86f3cb46e5856c4066cac14e73f46c3cefb8453e"
         baseline = {
             "repository": "ltn-it/ansible-collection-supplementary",
@@ -910,6 +911,19 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             "triggering_actor": "litroc",
         }
         examples = [
+            ({"event.before": closed_c25_before}, True),
+            (
+                {
+                    "event.before": closed_c25_before,
+                    "actor": "litdeg",
+                    "actor_id": "247824904",
+                    "triggering_actor": "litdeg",
+                },
+                True,
+            ),
+            ({"event.before": closed_c25_before[:-1] + "a"}, False),
+            ({"event.before": closed_c25_before, "run_attempt": "2"}, False),
+            ({"event.before": closed_c25_before, "event_name": "workflow_dispatch"}, False),
             ({"event.before": closed_c24_before}, True),
             (
                 {
@@ -1256,6 +1270,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                     closed_c22_before,
                     prelease_c23_before,
                     closed_c24_before,
+                    closed_c25_before,
                 ],
                 windows,
             )
