@@ -813,7 +813,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             self.assertEqual(
                 "ltn-it/modulix-validation/.github/workflows/"
                 "collection-quality-profile-isolated.yml@"
-                "14c9a0a00f64da5b531e0236c871f6a4eee8444c",
+                "37a023a34f3d5e8d7b5f033c0caa06ae4f63c7f3",
                 delegated["uses"],
             )
             self.assertNotIn("environment-name", delegated["with"])
@@ -896,6 +896,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         failed_capacity_before = "8cf199eedd68e653f97a4739a5d0b2e7235f91f5"
         closed_custody_before = "aca24665c7d0e192974e1bb030737a349c6b70db"
         closed_c22_before = "af5a45eca7e7dcaa85af8bea3e6d77c775fd8b9a"
+        prelease_c23_before = "98157a078b130bc6daa61adb5bc76e17e4acac2c"
         partial_preparation_failure = "86f3cb46e5856c4066cac14e73f46c3cefb8453e"
         baseline = {
             "repository": "ltn-it/ansible-collection-supplementary",
@@ -908,6 +909,19 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             "triggering_actor": "litroc",
         }
         examples = [
+            ({"event.before": prelease_c23_before}, True),
+            (
+                {
+                    "event.before": prelease_c23_before,
+                    "actor": "litdeg",
+                    "actor_id": "247824904",
+                    "triggering_actor": "litdeg",
+                },
+                True,
+            ),
+            ({"event.before": prelease_c23_before[:-1] + "d"}, False),
+            ({"event.before": prelease_c23_before, "run_attempt": "2"}, False),
+            ({"event.before": prelease_c23_before, "event_name": "workflow_dispatch"}, False),
             ({"event.before": closed_c22_before}, True),
             (
                 {
@@ -1226,6 +1240,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                     failed_capacity_before,
                     closed_custody_before,
                     closed_c22_before,
+                    prelease_c23_before,
                 ],
                 windows,
             )
