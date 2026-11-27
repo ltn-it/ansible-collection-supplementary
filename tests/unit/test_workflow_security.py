@@ -813,7 +813,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             self.assertEqual(
                 "ltn-it/modulix-validation/.github/workflows/"
                 "collection-quality-profile-isolated.yml@"
-                "50f69a7c7705878eb84831516b9a3308faa6a3d3",
+                "5b4222e1a8851a8c65f7974dc4c301698da5cf38",
                 delegated["uses"],
             )
             self.assertNotIn("environment-name", delegated["with"])
@@ -900,6 +900,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         closed_c24_before = "e14d885efe872712030a144494b00df980acfa38"
         closed_c25_before = "91f581f565ce21beb1b4ce3a59c71c8d332c951f"
         prelease_c26_before = "462614f6c6f236383e51220828ee0b2d6af7d9c7"
+        prelease_c27_before = "41c24d2b020d702d0009a1b0f0dd50d4c75c9477"
         partial_preparation_failure = "86f3cb46e5856c4066cac14e73f46c3cefb8453e"
         baseline = {
             "repository": "ltn-it/ansible-collection-supplementary",
@@ -912,6 +913,19 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             "triggering_actor": "litroc",
         }
         examples = [
+            ({"event.before": prelease_c27_before}, True),
+            (
+                {
+                    "event.before": prelease_c27_before,
+                    "actor": "litdeg",
+                    "actor_id": "247824904",
+                    "triggering_actor": "litdeg",
+                },
+                True,
+            ),
+            ({"event.before": prelease_c27_before[:-1] + "8"}, False),
+            ({"event.before": prelease_c27_before, "run_attempt": "2"}, False),
+            ({"event.before": prelease_c27_before, "event_name": "workflow_dispatch"}, False),
             ({"event.before": prelease_c26_before}, True),
             (
                 {
@@ -1286,6 +1300,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                     closed_c24_before,
                     closed_c25_before,
                     prelease_c26_before,
+                    prelease_c27_before,
                 ],
                 windows,
             )
