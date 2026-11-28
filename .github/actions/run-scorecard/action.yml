@@ -32,4 +32,4 @@ inputs:
 
 runs:
   using: docker
-  image: docker://ghcr.io/ossf/scorecard-action:v2.4.3@sha256:2dd6a6d60100f78ef24e14a47941d0087a524b4d3642041558239b1c6097c941
+  image: docker://ghcr.io/ossf/scorecard-action:v2.6.0@sha256:7a62770a1e88f3bcaed20cbf9a57206c6531eb77653e415ca3c3c6e8d140877b
