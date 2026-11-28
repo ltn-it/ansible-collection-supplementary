@@ -813,7 +813,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             self.assertEqual(
                 "ltn-it/modulix-validation/.github/workflows/"
                 "collection-quality-profile-isolated.yml@"
-                "6461e64863cfb44a7b84852fce4eae428c516fda",
+                "43ce7ecd39d2054b2e3f8e51606a253708016eb0",
                 delegated["uses"],
             )
             self.assertNotIn("environment-name", delegated["with"])
@@ -902,6 +902,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         prelease_c26_before = "462614f6c6f236383e51220828ee0b2d6af7d9c7"
         prelease_c27_before = "41c24d2b020d702d0009a1b0f0dd50d4c75c9477"
         retired_c28_before = "5f95e001877ed7141fb12dd939a40ee8bde84498"
+        prelease_c29_before = "87e2542ed25827982daee69511fc3b83e4d63a43"
         partial_preparation_failure = "86f3cb46e5856c4066cac14e73f46c3cefb8453e"
         baseline = {
             "repository": "ltn-it/ansible-collection-supplementary",
@@ -914,6 +915,19 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             "triggering_actor": "litroc",
         }
         examples = [
+            ({"event.before": prelease_c29_before}, True),
+            (
+                {
+                    "event.before": prelease_c29_before,
+                    "actor": "litdeg",
+                    "actor_id": "247824904",
+                    "triggering_actor": "litdeg",
+                },
+                True,
+            ),
+            ({"event.before": prelease_c29_before[:-1] + "4"}, False),
+            ({"event.before": prelease_c29_before, "run_attempt": "2"}, False),
+            ({"event.before": prelease_c29_before, "event_name": "workflow_dispatch"}, False),
             ({"event.before": retired_c28_before}, True),
             (
                 {
@@ -1316,6 +1330,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                     prelease_c26_before,
                     prelease_c27_before,
                     retired_c28_before,
+                    prelease_c29_before,
                 ],
                 windows,
             )
