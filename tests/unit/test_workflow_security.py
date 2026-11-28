@@ -813,7 +813,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
             self.assertEqual(
                 "ltn-it/modulix-validation/.github/workflows/"
                 "collection-quality-profile-isolated.yml@"
-                "43ce7ecd39d2054b2e3f8e51606a253708016eb0",
+                "2b453b8fc49e5d7a552b5eb17f1fd88e4b883438",
                 delegated["uses"],
             )
             self.assertNotIn("environment-name", delegated["with"])
@@ -903,6 +903,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         prelease_c27_before = "41c24d2b020d702d0009a1b0f0dd50d4c75c9477"
         retired_c28_before = "5f95e001877ed7141fb12dd939a40ee8bde84498"
         prelease_c29_before = "87e2542ed25827982daee69511fc3b83e4d63a43"
+        closed_c30_before = "25bd401d56395e468609ba89d8b2088a2aae9664"
         partial_preparation_failure = "86f3cb46e5856c4066cac14e73f46c3cefb8453e"
         baseline = {
             "repository": "ltn-it/ansible-collection-supplementary",
@@ -916,6 +917,19 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
         }
         examples = [
             ({"event.before": prelease_c29_before}, True),
+            ({"event.before": closed_c30_before}, True),
+            (
+                {
+                    "event.before": closed_c30_before,
+                    "actor": "litdeg",
+                    "actor_id": "247824904",
+                    "triggering_actor": "litdeg",
+                },
+                True,
+            ),
+            ({"event.before": closed_c30_before[:-1] + "5"}, False),
+            ({"event.before": closed_c30_before, "run_attempt": "2"}, False),
+            ({"event.before": closed_c30_before, "event_name": "workflow_dispatch"}, False),
             (
                 {
                     "event.before": prelease_c29_before,
@@ -1331,6 +1345,7 @@ printf '%s\\n' "$REQUIRE_FRAGMENT" >"$TEST_CAPTURE"
                     prelease_c27_before,
                     retired_c28_before,
                     prelease_c29_before,
+                    closed_c30_before,
                 ],
                 windows,
             )
