@@ -894,7 +894,7 @@ jobs:
       - name: Validate candidate, MANIFEST, evidence, and repository policy
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          G06_VALIDATION_CONTROLLER_SHA: 6461e64863cfb44a7b84852fce4eae428c516fda
+          G06_VALIDATION_CONTROLLER_SHA: 43ce7ecd39d2054b2e3f8e51606a253708016eb0
           CI_RUN_ID: ${{ needs.release-validation.outputs.ci-run-id }}
           CI_RUN_ATTEMPT: ${{ needs.release-validation.outputs.ci-run-attempt }}
           REQUEST_CREATE_GITHUB_RELEASE: ${{ inputs.create_github_release }}
